@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "timegraph"
+version = "0.0.1"
+authors = [
+  { name="Benjamin Kane", email="Ben.Kane@me.com" }
+]
+description = "An implementation of the timegraph data structure and algorithm for evaluating temporal relations."
+readme = "README.md"
+requires-python = ">=3.7"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+]
+
+[project.urls]
+"Homepage" = "https://github.com/bkane2/ulflib-py"
+"Bug Tracker" = "https://github.com/bkane2/ulflib-py/issues"
