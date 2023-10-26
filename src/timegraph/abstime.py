@@ -1,244 +1,341 @@
-"""Utilities for recording and modifying time points."""
+"""Absolute time implementation."""
 
 import copy
 from datetime import date,datetime,timezone
 
-DATETIME_ARGS = ['year', 'month', 'day', 'hour', 'minute', 'second']
-DATETIME_VARS = ['?y', '?mo', '?d', '?h', '?mi', '?s']
-DATETIME_LOWER = {
-  'year' : 1,
-  'month' : 1,
-  'day' : 1,
-  'hour' : 0,
-  'minute' : 0,
-  'second' : 0
-}
-DATETIME_UPPER = {
-  'year' : date.today().year,
-  'month' : 12,
-  'day' : 31,
-  'hour' : 23,
-  'minute' : 59,
-  'second' : 59
-}
-
-
-# class AbsTimeInterval:
-#   """A specific absolute time interval bounded by a lower timestamp and an upper timestamp.
-
-#   Parameters
-#   ----------
-#   time : datetime, tuple[datetime, datetime], list[str], or None
-#     Initialize with a given datetime, or otherwise use the current time. The following formats are supported:
-
-#       - datetime : a single instantaneous timestamp.
-#       - (datetime, datetime) : lower and upper bound timestamps for this time point.
-#       - (<year>, <month>, <day>, <hour>, <minute>, <second>) : a date+time tuple.
-#       - [$, date+time, <year>, <month>, <day>, <hour>, <minute>, <second>] : a date+time record structure, where
-#         each slot may be either a number string or a variable string.
-#       - None : the time point will be initialized to the current time.
-
-#   Attributes
-#   ----------
-#   lower : datetime
-#     A timestamp for the lower bound on this interval.
-#   upper : datetime
-#     A timestamp for the upper bound on this interval.
-#   """
-
-#   def __init__(self, time=None):
-#     self.update(time)
-
-#   def update(self, time=None):
-#     """Update this interval to the given time (or current if none is given)."""
-#     if isinstance(time, datetime):
-#       self.lower = time
-#       self.upper = time
-#     elif time_pair_p(time):
-#       self.lower, self.upper = time
-#     elif time_tuple_p(time):
-#       self.lower, self.upper = time_pair_from_tuple(time)
-#     elif time_record_p(time):
-#       self.lower, self.upper = time_pair_from_record(time)
-#     elif time is None:
-#       now = datetime.now(timezone.utc)
-#       self.lower = now
-#       self.upper = now
-#     else:
-#       raise Exception("Invalid format given for 'time'.")
-  
-#   def to_num(self, bound='upper'):
-#     """Convert to a numerical POSIX representation (using the upper bound by default)."""
-#     if bound == 'upper':
-#       return self.upper.timestamp()
-#     else:
-#       return self.lower.timestamp()
-    
-#   def get_duration(self):
-#     """Get the timestamp for the duration of this interval."""
-#     return self.to_num(bound='upper') - self.to_num(bound='lower')
-  
-#   def get_elapsed(self, absi):
-#     """Get the minimum and maximum elapsed times between this interval and another interval."""
-#     vals = [abs(self.lower-absi.upper), abs(self.lower-absi.lower), abs(self.upper-absi.upper), abs(self.upper-absi.lower)]
-#     return min(vals), max(vals)
-  
-#   def format(self):
-#     """Format as a year/month/day/hour/minute/second representation."""
-#     y, mo, d, h, mi, s = tuple_from_time_pair(self.lower, self.upper)
-#     return f":year/{y}/:month/{mo}/:day/{d}/:hour/{h}/:minute/{mi}/:sec/{s}"
-  
-#   def format_date(self):
-#     """Format as a human-readable year/month/day/hour/minute/second representation."""
-#     y, mo, d, h, mi, s = tuple_from_time_pair(self.lower, self.upper)
-#     return f"{y}-{mo}-{d}-{h}-{mi}-{s}"
-  
-#   def to_ulf(self):
-#     """Convert to a ULF record structure."""
-#     time = self.format().split('/')
-#     return ['$', 'date+time']+time
-  
-#   def copy(self):
-#     return copy.copy(self)
-  
-#   def __str__(self):
-#     return self.format().replace('/', ' ')
-  
+from timegraph.constants import *
+from timegraph.pred import test_point_answer
 
 class AbsTime:
-  """A specific absolute time (i.e., an "instantaneous" point).
+  """A specific absolute time.
 
   Parameters
   ----------
-  time : datetime, tuple[datetime, datetime], list[str], or None
-    Initialize with a given datetime, or otherwise use the current time. The following formats are supported:
-
-      - datetime : a single instantaneous timestamp.
-      - (<year>, <month>, <day>, <hour>, <minute>, <second>) : a date+time tuple.
-      - [$, date+time, <year>, <month>, <day>, <hour>, <minute>, <second>] : a date+time record structure.
-      - None : the time point will be initialized to the current time.
+  time : list[int or str]
+    A list structure representing the absolute time data, interpreted
+    as year, month, day, hour, minute, second. Each value may either be a
+    number or a symbol representing a variable argument.
   """
 
   def __init__(self, time=None):
     self.update(time)
 
+
   def update(self, time=None):
-    """Update this interval to the given time (or current if none is given)."""
+    """Update this absolute time to the given time (or current if none is given)."""
     if isinstance(time, datetime):
+      self.time = self._parse_datetime(time)
+    elif type(time) in [int, float]:
+      self.time = self._parse_timestamp(time)
+    elif isinstance(time, list) and all([type(x) in [int, str] for x in time]) and len(time) <= 6:
+      time = [int(t) if t.isdigit() else t for t in time]
       self.time = time
-    elif time_tuple_p(time, allow_vars=False):
-      self.time, _ = time_pair_from_tuple(time)
-    elif time_record_p(time, allow_vars=False):
-      self.time, _ = time_pair_from_record(time)
     elif time is None:
-      self.time = datetime.now()
+      self.time = self._parse_datetime(datetime.now())
     else:
       raise Exception("Invalid format given for 'time'.")
+    return self
     
+
+  def to_datetime(self):
+    """Convert this absolute time to a datetime object (assuming no variable arguments)."""
+    return self.to_datetime_bounds()[0]
+    
+
+  def to_datetime_bounds(self):
+    """Convert this absolute time to lower/upper bound datetime objects."""
+    args_l = { k:v for k,v in zip(DATETIME_ARGS, self.time) }
+    args_u = { k:v for k,v in zip(DATETIME_ARGS, self.time) }
+    for k, v in args_l.items():
+      if not isinstance(v, int):
+        args_l[k] = DATETIME_LOWER[k]
+    for k in DATETIME_REQUIRED_ARGS:
+      if k not in args_l:
+        args_l[k] = DATETIME_LOWER[k]
+    for k, v in args_u.items():
+      if not isinstance(v, int):
+        args_u[k] = DATETIME_UPPER[k]
+    for k in DATETIME_REQUIRED_ARGS:
+      if k not in args_u:
+        args_u[k] = DATETIME_UPPER[k]
+    return datetime(**args_l), datetime(**args_u)
+  
+
   def to_num(self):
-    """Convert to a numerical POSIX representation."""
-    return self.time.timestamp()
+    """Convert to a numerical POSIX representation (assuming no variable arguments)."""
+    return self.to_datetime().timestamp()
   
-  def duration(self, ap):
-    """Get the duration between this absolute time and another absolute time."""
-    return abs(self.time - ap.time)
+
+  def to_record(self):
+    """Convert to a slot/value record structure."""
+    return ['$', 'date+time']+' '.join([f':{k} {v}' for k,v in zip(DATETIME_ARGS, self.time)]).split()
   
-  def format(self):
-    """Format as a year/month/day/hour/minute/second representation."""
-    y, mo, d, h, mi, s = tuple_from_time_pair(self.time, self.time)
-    return f":year/{y}/:month/{mo}/:day/{d}/:hour/{h}/:minute/{mi}/:sec/{s}"
+
+  def has_symbols(self):
+    """Check if this time has symbol/variable arguments."""
+    return not all([isinstance(x, int) for x in self.time])
   
-  def format_date(self):
-    """Format as a human-readable year/month/day/hour/minute/second representation."""
-    y, mo, d, h, mi, s = tuple_from_time_pair(self.time, self.time)
-    return f"{y}-{mo}-{d}-{h}-{mi}-{s}"
+
+  def calc_add_dur(self, dur):
+    """Add `dur` seconds to the absolute time, returning a new absolute time."""
+    if not isinstance(dur, int) or dur == 0 or self.has_symbols():
+      return self.copy()
+    numdur = self.to_num() + dur
+    return AbsTime(numdur)
   
-  def to_ulf(self):
-    """Convert to a ULF record structure."""
-    time = self.format().split('/')
-    return ['$', 'date+time']+time
+
+  def update_add_dur(self, dur):
+    """Update the absolute time to `dur` seconds after."""
+    if not isinstance(dur, int) or dur == 0 or self.has_symbols():
+      return self
+    numdur = self.to_num() + dur
+    return self.update(numdur)
   
+
+  def calc_sub_dur(self, dur):
+    """Subtract `dur` seconds to the absolute time, returning a new absolute time."""
+    if not isinstance(dur, int) or dur == 0 or self.has_symbols():
+      return self.copy()
+    numdur = self.to_num() - dur
+    if numdur >= 0:
+      return AbsTime(numdur)
+    else:
+      return self.copy()
+    
+    
+  def update_sub_dur(self, dur):
+    """Update the absolute time to `dur` seconds before."""
+    if not isinstance(dur, int) or dur == 0 or self.has_symbols():
+      return self
+    numdur = self.to_num() - dur
+    if numdur >= 0:
+      return self.update(numdur)
+    else:
+      return self
+    
+
+  def merge_abs_min(self, newabs, max):
+    """Merge the minimum of this time and a new time, taking the maximum of the two."""
+    return AbsTime(merge_min(self.time, newabs.time, max.time))
+  
+
+  def merge_abs_max(self, newabs, min):
+    """Merge the maximum of this time and a new time, taking the minimum of the two."""
+    return AbsTime(merge_max(self.time, newabs.time, min.time))
+    
+
+  def re_calc_abs_min(self, oldabs, max, duration):
+    """Compute the new absolute time `duration` seconds after `propabs`, taking the maximum of that and `oldabs`."""
+    new = self.calc_add_dur(duration)
+    new.time = choose_max(oldabs.time, new.time, max.time)
+    return new
+
+
+  def re_calc_abs_max(self, oldabs, min, duration):
+    """Compute the new absolute time `duration` seconds before `propabs`, taking the minimum of that and `oldabs`."""
+    new = self.calc_sub_dur(duration)
+    new.time = choose_min(oldabs.time, new.time, min.time)
+    return new
+
+
+  def calc_duration_min(self, other):
+    """Calculates the minimum duration between this and another absolute time."""
+    if not other or not isinstance(other, AbsTime):
+      return None
+    diff = other.to_num() - self.to_num()
+    return diff if diff >= 0 else 0
+  
+
+  def calc_duration_max(self, other):
+    """Calculates the maximum duration between this and another absolute time.
+    
+    Notes
+    -----
+    This works OK for all numeric absolute times, but not for ones with symbols.
+    """
+    if not other or not isinstance(other, AbsTime):
+      return None
+    if self.has_symbols() or other.has_symbols():
+      return None
+    return other.to_num() - self.to_num()
+
+
+  def get_compare(self, other, max=True):
+    """Return the maximum/minimum of this time and another time (or return None if cannot be compared)."""
+    def compare_rec(abs1, abs2):
+      if not abs1 or not abs2:
+        return 0
+      e1 = abs1[0]
+      e2 = abs2[0]
+      if isinstance(e1, int):
+        if isinstance(e2, int):
+          if (max and e1 > e2) or (not max and e1 < e2):
+            return 1
+          elif (max and e1 < e2) or (not max and e1 > e2):
+            return 2
+          else:
+            return compare_rec(abs1[1:], abs2[1:])
+        else:
+          return 1
+      else:
+        if isinstance(e2, int):
+          return 2
+        elif e1 == e2:
+          return compare_rec(abs1[1:], abs2[1:])
+        else:
+          return 1
+
+    compare = compare_rec(self.time, other.time)
+    return self if compare == 1 else other if compare == 2 else None
+
+
   def copy(self):
     return copy.copy(self)
   
+
   def __str__(self):
-    return self.format().replace('/', ' ')
-
-  def __lt__(self, other):
-    return self.time < other.time
-
-  def __le__(self, other):
-    return self.time <= other.time
+    return ', '.join([f'{k}: {v}' for k,v in zip(DATETIME_ARGS, self.time)])
+  
 
   def __eq__(self, other):
     return self.time == other.time
-
-  def __ne__(self, other):
-    return self.time != other.time
-
-  def __gt__(self, other):
-    return self.time > other.time
-
-  def __ge__(self, other):
-    return self.time >= other.time
+    
+  
+  def _parse_datetime(self, dt):
+    args = dt.strftime("%Y-%m-%d-%H-%M-%S").split('-')
+    return [int(x) for x in args]
   
 
-def time_pair_p(x):
-  return isinstance(x, tuple) and len(x) == 2 and all([isinstance(t, datetime) for t in x])
-
-def time_tuple_p(x, allow_vars=True):
-  return (isinstance(x, tuple) and len(x) == 6 and all([isinstance(t, str) for t in x])
-          and (allow_vars or all([t.isdigit() for t in x])))
-
-def time_record_p(x, allow_vars=True):
-  return (isinstance(x, list) and len(x) == 14 and x[0] == '$' and x[1] == 'date+time'
-          and all([isinstance(t, str) for t in x[2:]])
-          and all([t in [':'+a for a in DATETIME_ARGS] for t in x[2::2]])
-          and (allow_vars or all([t.isdigit() for t in x[3::2]])))
+  def _parse_timestamp(self, ts):
+    dt = datetime.fromtimestamp(ts)
+    return self._parse_datetime(dt)
   
 
-def time_pair_from_tuple(tuple):
-  """Given a year/month/day/hour/minute/second tuple, possibly containing "variables", return the lower and upper bound datetimes."""
-  args_lower = { k:v for k,v in zip(DATETIME_ARGS, tuple) }
-  args_upper = { k:v for k,v in zip(DATETIME_ARGS, tuple) }
-  for k, v in args_lower.items():
-    if v.isdigit():
-      args_lower[k] = int(v)
+
+# ``````````````````````````````````````
+# Utilities
+# ``````````````````````````````````````
+
+
+
+def get_extremum(abs1, abs2, max=True):
+  """Return the maximum/minimum of `abs1` and `abs2` (or return None if cannot be compared)."""
+  if not abs1 or not abs2:
+    return []
+  e1 = abs1[0]
+  e2 = abs2[0]
+  if isinstance(e1, int):
+    if isinstance(e2, int):
+      if (max and e1 > e2) or (not max and e1 < e2):
+        return abs1
+      elif (max and e1 < e2) or (not max and e1 > e2):
+        return abs2
+      else:
+        return [e1] + get_extremum(abs1[1:], abs2[1:], max=max)
     else:
-      args_lower[k] = DATETIME_LOWER[k]
-  for k, v in args_upper.items():
-    if v.isdigit():
-      args_upper[k] = int(v)
+      return abs1
+  else:
+    if isinstance(e2, int):
+      return abs2
+    elif e1 == e2:
+      return [e1] + get_extremum(abs1[1:], abs2[1:], max=max)
     else:
-      args_upper[k] = DATETIME_UPPER[k]
-  return datetime(**args_lower), datetime(**args_upper)
+      return abs1
+    
+
+def replace_unknowns(abs1, abs2):
+  """Replace variable terms in `abs1` with numbers from `abs2` if possible."""
+  return [a if isinstance(a, int) else b if isinstance(b, int) else a for a, b in zip(abs1, abs2)]
 
 
-def time_pair_from_record(record):
-  """Given a ULF date+time record structure, possibly containing "variables", return the lower and upper bound datetimes."""
-  return time_pair_from_tuple(tuple(record[3::2]))
+def choose_max(oldabs, newabs, max):
+  """Return the maximum of `oldabs` and `newabs`, as long as it is no greater than `max`."""
+  if not oldabs:
+    return newabs
+  if not newabs:
+    return oldabs
+  
+  setabs = get_extremum(oldabs, newabs, max=True)
+  if not test_point_answer(PRED_AFTER, compare(setabs, max)):
+    return setabs
+  else:
+    return oldabs
   
 
-def tuple_from_time_pair(lower, upper):
-  """Given a lower and upper bound datetime objects, create a year/month/day/hour/minute/second tuple."""
-  tup = [_ for _ in range(len(DATETIME_ARGS))]
-  args_lower = lower.strftime("%Y-%m-%d-%H-%M-%S").split('-')
-  args_upper = upper.strftime("%Y-%m-%d-%H-%M-%S").split('-')
-  for idx, (arg_l, arg_u) in enumerate(zip(args_lower, args_upper)):
-    if arg_l != arg_u:
-      tup[idx] = DATETIME_VARS[idx]
-    else:
-      tup[idx] = arg_u
-  return tuple(tup)
-
-
-def record_from_time_pair(lower, upper):
-  """Given a lower and upper bound datetime objects, create a ULF date+time record structure."""
-  tup = tuple_from_time_pair(lower, upper)
-  record = [sub[item] for item in range(len(tup)) for sub in [[':'+x for x in DATETIME_ARGS], tup]]
-  return ['$', 'date+time'] + record
+def choose_min(oldabs, newabs, min):
+  """Return the minimum of `oldabs` and `newabs`, as long as it is no less than `min`."""
+  if not oldabs:
+    return newabs
+  if not newabs:
+    return oldabs
+  
+  setabs = get_extremum(oldabs, newabs, max=False)
+  if not test_point_answer(PRED_BEFORE, compare(setabs, min)):
+    return setabs
+  else:
+    return oldabs
   
 
-def now():
-  """Return a POSIX timestamp corresponding to the time of the function call."""
-  return datetime.now(timezone.utc).timestamp()
+def merge_min(oldabs, newabs, max):
+  """Merge the minimum of an old absolute time and a new time, taking the maximum of the two.
+  
+  The maximum absolute time is taken if one is strictly greater than the other,
+  and constant or variable names are replaced by numbers if possible.
+  """
+  if not oldabs:
+    return newabs
+  if not newabs:
+    return oldabs
+  
+  newmin = choose_max(replace_unknowns(oldabs, newabs), newabs, max)
+  return newmin if newmin == newabs else oldabs
+
+
+def merge_max(oldabs, newabs, min):
+  """Merge the maximum of an old absolute time and a new time, taking the minimum of the two.
+  
+  The minimum absolute time is taken if one is strictly greater than the other,
+  and constant or variable names are replaced by numbers if possible.
+  """
+  if not oldabs:
+    return newabs
+  if not newabs:
+    return oldabs
+  
+  newmax = choose_min(replace_unknowns(oldabs, newabs), newabs, min)
+  return newmax if newmax == newabs else oldabs
+
+
+def compare_elements(abs1, abs2):
+  """Compare two absolute times element-by-element."""
+  if not abs1:
+    return PRED_SAME_TIME
+  a1 = abs1[0]
+  a2 = abs2[0]
+  if a1 == a2:
+    return compare_elements(abs1[1:], abs2[1:])
+  elif isinstance(a1, int) and isinstance(a2, int):
+    strict = 1
+    return f'{PRED_AFTER}-{strict}' if a1 > a2 else f'{PRED_BEFORE}-{strict}'
+  return PRED_UNKNOWN
+
+
+def compare(abs1, abs2):
+  """Return the relation between the two absolute times `abs1` and `abs2`."""
+  if not abs1 or not abs2:
+    return PRED_UNKNOWN
+  else:
+    return compare_elements(abs1, abs2)
+
+
+def duration_min(d1, d2):
+  """Determine the appropriate duration to use, i.e., the given one or the one calculated from the absolute times."""
+  if not d1 or d1 == float('-inf'):
+    if not d2 or d2 == float('-inf'):
+      return 0
+    else:
+      return d2
+  elif not d2 or d2 == float('-inf'):
+    return d1
+  else:
+    return min(d1, d2)

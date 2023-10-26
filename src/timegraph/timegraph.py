@@ -4,7 +4,7 @@ import math
 from collections import UserList
 
 from timegraph.constants import *
-from timegraph.abstime import AbsTime
+from timegraph.abstime import AbsTime, duration_min
 
 # ``````````````````````````````````````
 # TimePoint
@@ -47,10 +47,10 @@ class TimePoint:
   name : str
   """
 
-  def __init__(self, name):
+  def __init__(self, name, chain=None, pseudo=PSEUDO_INIT):
     self.name = name
-    self.chain = None
-    self.pseudo = None
+    self.chain = chain
+    self.pseudo = pseudo
     self.min_pseudo = float('-inf')
     self.max_pseudo = float('inf')
     self.absolute_min = None
@@ -128,24 +128,82 @@ class TimePoint:
     return True if not self.descendants else False
   
 
+  def update_first(self):
+    """If this point is earlier on its chain than the current first point, update the first pointer."""
+    meta = self.chain
+    first = meta.first
+    if not first or self.pseudo < first.pseudo:
+      meta.first = self
+  
+
   def add_ancestor_link(self, timelink):
     """Add a link on the in chain ancestor list."""
-    self.ancestors.ins(timelink)
+    self.ancestors.add(timelink)
 
 
   def add_descendant_link(self, timelink):
     """Add a link on the in chain descendant list."""
-    self.descendants.ins(timelink)
+    self.descendants.add(timelink)
 
 
   def add_xancestor_link(self, timelink):
     """Add a link on the cross chain ancestor list."""
-    self.xancestors.ins(timelink)
+    self.xancestors.add(timelink)
 
 
   def add_xdescendant_link(self, timelink):
     """Add a link on the cross chain descendant list."""
-    self.xdescendants.ins(timelink)
+    self.xdescendants.add(timelink)
+
+
+  def prop_absmin(self):
+    """Propagate absolute time minimum from the given point to any descendants."""
+    dlist = self.descendants
+    xdlist = self.xdescendants
+
+    # Propagate only to first in chain descendant - since it is recursive it will
+    # get the rest of the chain anyway
+    if dlist:
+      dlist[0].prop_min_to_point()
+    
+    # Propagate to all x-descendants
+    for xitem in xdlist:
+      xitem.prop_min_to_point()
+
+
+  def prop_absmax(self, oldabs):
+    """Propagate absolute time maximum from the given point to any ancestors."""
+    alist = self.ancestors
+    xalist = self.xancestors
+
+    # Propagate only to first in chain ancestor - since it is recursive it will
+    # get the rest of the chain anyway
+    if alist:
+      alist[0].prop_max_to_point(oldabs)
+    
+    # Propagate to all x-ancestors
+    for xitem in xalist:
+      xitem.prop_max_to_point(oldabs)
+
+
+  def update_absolute_min(self, abs):
+    """Add a new absolute minimum time to this point."""
+    max = self.absolute_max
+    oldabs = self.absolute_min
+    newabs = oldabs.merge_abs_min(abs, max)
+    if not oldabs == newabs:
+      self.absolute_min = newabs
+      self.prop_absmin()
+
+
+  def update_absolute_max(self, abs):
+    """Add a new absolute maximum time to this point."""
+    min = self.absolute_min
+    oldabs = self.absolute_max
+    newabs = oldabs.merge_abs_max(abs, min)
+    if not oldabs == newabs:
+      self.absolute_max = newabs
+      self.prop_absmax(oldabs)
 
 
 
@@ -202,6 +260,64 @@ class TimeLink:
     return self.to_tp.pseudo
   
 
+  def prop_min_to_point(self):
+    """Propagate the minimum absolute time to the next descendant (the from point of this link)."""
+    pt1 = self.from_tp
+    pt2 = self.to_tp
+    pt1abs = pt1.absolute_min
+    pt1max = pt1.absolute_max
+    pt2abs = pt2.absolute_min
+    max = pt2.absolute_max
+    durmin = self.duration_min
+    durabs = pt1max.calc_duration_min(pt2abs)
+    usedur = duration_min(durmin, durabs)
+
+    newabs = pt1abs.re_calc_abs_min(pt2abs, max, usedur)
+    if not newabs == pt2abs:
+      pt2.absolute_min = newabs
+      pt2.prop_absmin()
+
+
+  def prop_max_to_point(self, oldabs):
+    """Propagate the maximum absolute time to the previous ancestor (the to point of this link)."""
+    pt1 = self.to_tp
+    pt2 = self.from_tp
+    pt1abs = pt1.absolute_max
+    pt2min = pt2.absolute_min
+    pt2abs = pt2.absolute_max
+    durmin = self.duration_min
+    durabs = oldabs.calc_duration_min(pt2min)
+    usedur = duration_min(durmin, durabs)
+
+    newabs = pt1abs.re_calc_abs_max(pt2abs, pt2min, usedur)
+    if not newabs == pt2abs:
+      pt2.absolute_max = newabs
+      pt2.prop_absmax()
+
+
+  def update_duration_min(self, d):
+    """Add a minimum duration to this link and propagate absolute time if necessary."""
+    if (d > 0 and not self.strict) or (not self.duration_min or d > self.duration_min):
+      tp1 = self.from_tp
+      tp2 = self.to_tp
+      if d > 0 and not self.strict:
+        self.strict = True
+        if tp1.on_same_chain(tp2):
+          pass
+          # TODO
+          # tp1.add_strictness(tp2)
+      if not self.duration_min or d > self.duration_min:
+        self.duration_min = d
+        tp1.update_absolute_max(tp2.absolute_max.calc_sub_dur(d))
+        tp2.update_absolute_min(tp1.absolute_min.calc_add_dur(d))
+
+
+  def update_duration_max(self, d):
+    """Add a maximum duration to this link."""
+    if not self.duration_max or d < self.duration_max:
+      self.duration_max = d
+
+
   def __eq__(self, other):
     return (self.from_chain_number() == other.from_chain_number() and
             self.from_pseudo() == other.from_pseudo() and
@@ -219,7 +335,7 @@ class TimeLink:
 class TimeLinkList(UserList):
   """A list of time links (a wrapper around a basic Python list)."""
   
-  def ins(self, item):
+  def add(self, item):
     """Insert `item` at the appropriate place in the list.
     
     The lists of links are ordered from chain, from psuedo, to chain, to psuedo. If an item
@@ -256,6 +372,12 @@ class TimeLinkList(UserList):
     
     self.data = ins_rec(self.data, item)
     return self
+  
+
+  def remove(self, item):
+    """Remove `item` from the list if it exists in the list."""
+    if item in self.data:
+      self.data.remove(item)
   
 
 
@@ -312,12 +434,12 @@ class MetaNode:
 
 
 # ``````````````````````````````````````
-# EventNode
+# EventPoint
 # ``````````````````````````````````````
 
 
 
-class EventNode:
+class EventPoint:
   """A node representing an event (i.e., an interval with some start and end time points).
   
   Attributes
@@ -358,7 +480,7 @@ class TimeGraph:
     A hash table of time points constituting the timegraph.
   metagraph : dict[int, MetaNode]
     A hash table of meta nodes.
-  events : dict[str, EventNode]
+  events : dict[str, EventPoint]
     A hash table of event nodes.
   """
 
@@ -393,11 +515,25 @@ class TimeGraph:
     return self.metagraph[chain_number] if chain_number in self.metagraph else None
   
 
+  def event_point(self, name):
+    """Return the event point corresponding to `name`, if there is one, otherwise None."""
+    return self.events[name] if name in self.events else None
+  
+
   def add_meta_link(self, timelink):
     """Add a link to the meta graph for the appropriate chain."""
     if not timelink.from_chain_number() == timelink.to_chain_number():
       mn = self.time_chain(timelink.from_chain_number())
-      mn.connections.ins(timelink)
+      if mn:
+        mn.connections.add(timelink)
+
+
+  def remove_meta_link(self, timelink):
+    """Remove a link from the meta graph."""
+    if not timelink.from_chain_number() == timelink.to_chain_number():
+      mn = self.time_chain(timelink.from_chain_number())
+      if mn:
+        mn.connections.remove(timelink)
 
 
   def add_link(self, tp1, tp2, strict12):
@@ -415,6 +551,125 @@ class TimeGraph:
         tp2.add_xancestor_link(tl)
         self.add_meta_link(tl)
       return tl
+    
+
+  def remove_link(self, timelink, linklist):
+    """Remove `timelink` from `linklist`, as well as removing the meta-link if there is one."""
+    self.remove_meta_link(timelink)
+    linklist.remove(timelink)
+
+
+  def update_links(self, tp1, tp2, type):
+    """Update the links of `type` from `tp1` to `tp2`, where `type` is "descendants", "ancestors", "xdescendants", or "xancestors".
+    
+    If `type` is "(x)descendants", for each link in `tp1`'s (x)descendants list, the "to" point ancestor list
+    has this link removed, and then the link is added using `tp2` as the ancestor.
+
+    If `type` is "(x)ascendants", for each link in `tp1`'s (x)ancestors list, the "from" point descendant list
+    has this link removed, and then the link is added using `tp2` as the descendant.
+    """
+    if type not in POINT_LINK_PAIRS.keys():
+      raise Exception('Invalid type argument')
+    linklist = getattr(tp1, type)
+    for link in linklist:
+      if 'descendant' in type:
+        tp = link.to_tp
+      else:
+        tp = link.from_tp
+      durmin = link.duration_min
+      durmax = link.duration_max
+      self.remove_link(link, getattr(tp, POINT_LINK_PAIRS[type]))
+      if 'descendant' in type:
+        self.add_link(tp2, tp, link.strict)
+        self.new_duration_min(tp2, tp, durmin)
+        self.new_duration_max(tp2, tp, durmax)
+      else:
+        self.add_link(tp, tp2, link.strict)
+        self.new_duration_min(tp, tp2, durmin)
+        self.new_duration_max(tp, tp2, durmax)
+
+
+  def find_link(self, tp1, tp2):
+    """Find the link between `tp1`, and `tp2`, adding a link if none exists."""
+    chain2 = tp2.chain
+    pseudo2 = tp2.pseudo
+    if tp1.on_same_chain(tp2):
+      dlist = tp1.descendants
+    else:
+      dlist = tp1.xdescendants
+    link = None
+    for item in dlist:
+      if item.to_chain_number() == chain2.chain_number and item.to_pseudo() == pseudo2:
+        link = item
+        break
+    # Create link if it doesn't exist
+    if link is None:
+      link = self.add_link(tp1, tp2, 1)
+    return link
+
+
+  def copy_links(self, tp1, tp2):
+    """Copy all links for `tp1` to `tp2`.
+    
+    Ensures that only links with points on the same chain go into the new in-chain lists,
+    and only those with different chains go on the cross-chain lists.
+    """
+    self.update_links(tp1, tp2, 'ancestors')
+    self.update_links(tp1, tp2, 'xancestors')
+    self.update_links(tp1, tp2, 'descendants')
+    self.update_links(tp1, tp2, 'xdescendants')
+
+
+  def add_single(self, tpname):
+    """Add a single point to the net on a new chain."""
+    tp = TimePoint(tpname, chain=self.newchain())
+    self.timegraph[tpname] = tp
+    tp.update_first()
+    return tp
+  
+
+  def add_absolute_min(self, tpname, abs):
+    """Add an absolute minimum time to `tpname` (creating the point if it doesn't exist)."""
+    if tpname not in self.timegraph:
+      self.add_single(tpname)
+    self.timegraph[tpname].update_absolute_min(abs)
+
+
+  def add_absolute_max(self, tpname, abs):
+    """Add an absolute maximum time to `tpname` (creating the point if it doesn't exist)."""
+    if tpname not in self.timegraph:
+      self.add_single(tpname)
+    self.timegraph[tpname].update_absolute_max(abs)
+
+  
+  def new_duration_min(self, tp1, tp2, d):
+    """Create a duration minimum between `tp1` and `tp2`."""
+    link = self.find_link(tp1, tp2)
+    link.update_duration_min(d)
+
+
+  def add_duration_min(self, tpname1, tpname2, d):
+    """Add a duration minimum between `tpname1` and `tpname2`."""
+    if tpname1 not in self.timegraph or tpname2 not in self.timegraph:
+      raise Exception(f'One of {tpname1} or {tpname2} does not exist in the timegraph.')
+    tp1 = self.timegraph[tpname1]
+    tp2 = self.timegraph[tpname2]
+    self.new_duration_min(tp1, tp2, d)
+
+
+  def new_duration_max(self, tp1, tp2, d):
+    """Create a duration maximum between `tp1` and `tp2`."""
+    link = self.find_link(tp1, tp2)
+    link.update_duration_max(d)
+
+
+  def add_duration_max(self, tpname1, tpname2, d):
+    """Add a duration maximum between `tpname1` and `tpname2`."""
+    if tpname1 not in self.timegraph or tpname2 not in self.timegraph:
+      raise Exception(f'One of {tpname1} or {tpname2} does not exist in the timegraph.')
+    tp1 = self.timegraph[tpname1]
+    tp2 = self.timegraph[tpname2]
+    self.new_duration_max(tp1, tp2, d)
 
 
 
@@ -422,6 +677,8 @@ class TimeGraph:
 # Other
 # ``````````````````````````````````````
 
+
+
 def strict_p(x):
   """Check if strictness value is strict."""
-  return x == 1 or x == '1'
+  return x == 1 or x == '1' or x == True
