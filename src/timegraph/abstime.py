@@ -158,35 +158,11 @@ class AbsTime:
     if self.has_symbols() or other.has_symbols():
       return None
     return other.to_num() - self.to_num()
+  
 
-
-  def get_compare(self, other, max=True):
-    """Return the maximum/minimum of this time and another time (or return None if cannot be compared)."""
-    def compare_rec(abs1, abs2):
-      if not abs1 or not abs2:
-        return 0
-      e1 = abs1[0]
-      e2 = abs2[0]
-      if isinstance(e1, int):
-        if isinstance(e2, int):
-          if (max and e1 > e2) or (not max and e1 < e2):
-            return 1
-          elif (max and e1 < e2) or (not max and e1 > e2):
-            return 2
-          else:
-            return compare_rec(abs1[1:], abs2[1:])
-        else:
-          return 1
-      else:
-        if isinstance(e2, int):
-          return 2
-        elif e1 == e2:
-          return compare_rec(abs1[1:], abs2[1:])
-        else:
-          return 1
-
-    compare = compare_rec(self.time, other.time)
-    return self if compare == 1 else other if compare == 2 else None
+  def compare(self, other):
+    """Compare this to another absolute time and return the relation between them."""
+    return compare(self.time, other.time)
 
 
   def copy(self):
@@ -339,3 +315,42 @@ def duration_min(d1, d2):
     return d1
   else:
     return min(d1, d2)
+  
+
+def combine_durations(d1, d2):
+  """Add the two durations together, where each duration is a tuple ``(min, max)``.
+  
+  If the min of either is None, it is considered 0;
+  likewise if the max is, it is considered +infinity.
+  """
+  oldmin, oldmax = d1
+  newmin, newmax = d2
+
+  if oldmin is None and newmin is None:
+    calcmin = 0
+  elif oldmin is None:
+    calcmin = newmin
+  elif newmin is None:
+    calcmin = oldmin
+  else:
+    calcmin = oldmin + newmin
+  
+  if oldmax is None or newmax is None:
+    calcmax = float('inf')
+  else:
+    calcmax = oldmax + newmax
+
+  return (calcmin, calcmax)
+
+
+def get_best_duration(d1, d2):
+  """Return the best duration between two durations, where each duration is a tuple ``(min, max)``.
+  
+  Since both are assumed to be true for the same points, we just pick the best minimum
+  (the maximum one) and the best maximum (the minimum one).
+  """
+  min1 = 0 if d1[0] is None else d1[0]
+  min2 = 0 if d2[0] is None else d2[0]
+  max1 = float('inf') if d1[1] is None else d1[1]
+  max2 = float('inf') if d2[1] is None else d2[1]
+  return (max(min1, min2), min(max1, max2))

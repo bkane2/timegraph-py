@@ -4,7 +4,9 @@ import math
 from collections import UserList
 
 from timegraph.constants import *
-from timegraph.abstime import AbsTime, duration_min
+from timegraph.util import indent
+from timegraph.abstime import AbsTime, duration_min, combine_durations, get_best_duration
+from timegraph.pred import test_point_answer, inverse_reln, split_time_pred, build_pred
 
 # ``````````````````````````````````````
 # TimePoint
@@ -60,18 +62,6 @@ class TimePoint:
     self.descendants = TimeLinkList()
     self.xdescendants = TimeLinkList()
     self.alternate_names = []
-
-
-  def __str__(self):
-    return self.name
-  
-
-  def __hash__(self):
-    return hash(self.name)
-  
-
-  def __eq__(self, other):
-    return self.chain == other.chain and self.pseudo == other.pseudo
   
 
   def pseudo_before(self):
@@ -111,6 +101,20 @@ class TimePoint:
     """
     p2 = tp.pseudo
     return p2 > self.min_pseudo and p2 < self.max_pseudo
+  
+
+  def find_pseudo(self, tp):
+    """Find the most strict relation possible between this point and `tp` using their pseudo times."""
+    p1 = self.pseudo
+    p2 = tp.pseudo
+    if p1 == p2:
+      return PRED_SAME_TIME
+    elif p1 < p2:
+      return PRED_BEFORE if self.possibly_equal(tp) else f'{PRED_BEFORE}-{1}'
+    elif p1 > p2:
+      return PRED_AFTER if self.possibly_equal(tp) else f'{PRED_AFTER}-{1}'
+    else:
+      return PRED_UNKNOWN
   
 
   def on_same_chain(self, tp):
@@ -206,6 +210,79 @@ class TimePoint:
       self.prop_absmax(oldabs)
 
 
+  def duration_between(self, tp):
+    """Determine the duration between this and another point based on their absolute times."""
+    min1 = self.absolute_min
+    max1 = self.absolute_max
+    min2 = tp.absolute_min
+    max2 = tp.absolute_max
+    return (max1.calc_duration_min(min2), min1.calc_duration_max(max2))
+
+
+  def compare_absolute_times(self, tp):
+    """Return the relation between this point and `tp` based on their absolute times."""
+    absmin1 = self.absolute_min
+    absmax1 = self.absolute_max
+    absmin2 = tp.absolute_min
+    absmax2 = tp.absolute_max
+    test1 = absmax2.compare(absmin1)
+    test2 = absmax1.compare(absmin2)
+    test3 = absmin1.compare(absmin2)
+    test4 = absmax1.compare(absmax2)
+
+    # If max of self is before min of tp, then self is before tp
+    if test_point_answer(PRED_BEFORE, test2):
+      return PRED_BEFORE if test2 in PREDS_EQUIV else test2
+    # If max of tp is before min of self, then self is after tp
+    elif test_point_answer(PRED_BEFORE, test1):
+      return PRED_AFTER if test1 in PREDS_EQUIV+[PRED_BEFORE] else f'{PRED_AFTER}-{1}'
+    # If min of self = min of tp and max of self = max of tp, then they are equal
+    elif test_point_answer(PRED_EQUAL, test3) and test_point_answer(PRED_EQUAL, test4):
+      return PRED_SAME_TIME
+    # Otherwise there is no way to tell using absolute times
+    else:
+      return PRED_UNKNOWN
+
+
+  def __hash__(self):
+    return hash(self.name)
+  
+
+  def __eq__(self, other):
+    return self.chain == other.chain and self.pseudo == other.pseudo
+  
+
+  def format(self, verbose=False, lvl=0):
+    parts = []
+    parts.append(f'{indent(lvl)}Node {self.name}')
+    parts.append(f'{indent(lvl)}Chain {self.chain.chain_number}')
+    parts.append(f'{indent(lvl)}Pseudo {self.pseudo}')
+    parts.append(f'{indent(lvl)}Min-pseudo {self.min_pseudo}')
+    parts.append(f'{indent(lvl)}Max-pseudo {self.max_pseudo}')
+    absmin = 'unknown' if self.absolute_min is None else self.absolute_min
+    absmax = 'unknown' if self.absolute_max is None else self.absolute_max
+    parts.append(f'{indent(lvl)}Absolute-min {absmin}')
+    parts.append(f'{indent(lvl)}Absolute-max {absmax}')
+    if verbose:
+      if self.ancestors:
+        parts.append(f'{indent(lvl)}Ancestors')
+        parts.append(self.ancestors.format(node='from', lvl=lvl+1))
+      if self.descendants:
+        parts.append(f'{indent(lvl)}Descendants')
+        parts.append(self.descendants.format(node='to', lvl=lvl+1))
+      if self.xancestors:
+        parts.append(f'{indent(lvl)}XAncestors')
+        parts.append(self.xancestors.format(node='from', lvl=lvl+1))
+      if self.xdescendants:
+        parts.append(f'{indent(lvl)}XDescendants')
+        parts.append(self.xdescendants.format(node='to', lvl=lvl+1))
+    return '\n'.join(parts)
+
+
+  def __str__(self):
+    return self.format()
+
+
 
 # ``````````````````````````````````````
 # TimeLink
@@ -295,6 +372,16 @@ class TimeLink:
       pt2.prop_absmax()
 
 
+  def calc_duration(self):
+    """Calculate the duration on a link, using both the stored duration information and absolute times."""
+    tp1 = self.from_tp
+    tp2 = self.to_tp
+    absdur = tp1.duration_between(tp2)
+    dmin = self.duration_min
+    dmax = self.duration_max
+    return get_best_duration(absdur, (dmin, dmax))
+
+
   def update_duration_min(self, d):
     """Add a minimum duration to this link and propagate absolute time if necessary."""
     if (d > 0 and not self.strict) or (not self.duration_min or d > self.duration_min):
@@ -323,6 +410,19 @@ class TimeLink:
             self.from_pseudo() == other.from_pseudo() and
             self.to_chain_number() == other.to_chain_number() and
             self.to_pseudo() == other.to_pseudo())
+  
+
+  def format(self, node='both', lvl=0):
+    if node == 'to':
+      return f'{indent(lvl)}{self.to_tp.name}'
+    elif node == 'from':
+      return f'{indent(lvl)}{self.from_tp.name}'
+    else:
+      return f'{indent(lvl)}{self.from_tp.name} -> {self.to_tp.name}'
+    
+
+  def __str__(self):
+    return self.format()
 
 
 
@@ -378,6 +478,14 @@ class TimeLinkList(UserList):
     """Remove `item` from the list if it exists in the list."""
     if item in self.data:
       self.data.remove(item)
+
+  
+  def format(self, node='both', lvl=0):
+    return '\n'.join([link.format(node=node, lvl=lvl) for link in self.data])
+
+
+  def __str__(self):
+    return self.format()
   
 
 
@@ -482,6 +590,8 @@ class TimeGraph:
     A hash table of meta nodes.
   events : dict[str, EventPoint]
     A hash table of event nodes.
+  rel_table : dict[str, str]
+    A temporary storage of relations used in search algorithms.
   """
 
   def __init__(self):
@@ -489,6 +599,7 @@ class TimeGraph:
     self.timegraph = {}
     self.metagraph = {}
     self.events = {}
+    self.rel_table = {}
 
 
   def newchain(self):
@@ -672,6 +783,354 @@ class TimeGraph:
     self.new_duration_max(tp1, tp2, d)
 
 
+  def search_meta(self, tp1, tp2, already, sofar):
+    """Search for a path from `tp1` to `tp2` in the metagraph.
+    
+    Returns ``None`` if no path, ``before-1`` if a strict path, and
+    ``before`` if a non-strict path.
+
+    Notes
+    -----
+    Any path cannot go through any chain in `already`.
+    
+    `sofar` is the strictness value so far in the search.
+    """
+    chain1 = tp1.chain
+    chain2 = tp2.chain
+    xlist = None
+    res = None
+    newsofar = None
+    saveres = None
+
+    if tp1.name in self.rel_table:
+      return self.rel_table[tp1.name]
+
+    if chain1:
+      xlist = chain1.connections
+
+    # For each connection that the chain of tp1 has to another chain:
+    if not res and xlist:
+      for item in xlist:
+        frompt = item.from_tp
+        topt = item.to_tp
+        path1 = tp1.find_pseudo(frompt)
+        newchainno = item.to_chain_number()
+
+        # See if this link is usable (must be before or equal tp1)
+        if test_point_answer(PRED_BEFORE, path1):
+          newsofar = calc_path(sofar, path1, item)
+
+          # If we got the end chain, see if this ends the search
+          if newchainno == chain2.chain_number:
+            res = check_chain(newsofar, tp2, item)
+          # Otherwise continue search if this chain hasn't been searched yet
+          elif not newchainno in already:
+            res = self.search_meta(topt, tp2, [newchainno]+already, newsofar)
+
+          # If we have an answer, return it, otherwise continue with next connection
+          if res and res != PRED_UNKNOWN:
+            # If we have a strict path return it; if nonstrict, save it and continue search
+            if res == f'{PRED_BEFORE}-{1}':
+              return res
+            else:
+              saveres = res
+              res = None
+
+    # If no answer, see if we saved one earlier
+    if not res or res == PRED_UNKNOWN:
+      res = saveres
+    res = PRED_UNKNOWN if not res else res
+    if res:
+      self.rel_table[tp1.name] = res
+    res = None if res == PRED_UNKNOWN else res
+    return res
+  
+
+  def search_path(self, tp1, tp2):
+    """Return ``None`` if there is no path from `tp1` to `tp2`; ``before-1`` or ``before`` if there is."""
+    self.rel_table = {}
+    res = self.search_meta(tp1, tp2, [tp1.chain.chain_number], None)
+    self.rel_table = {}
+    return res
+  
+
+  def find_reln(self, tp1, tp2, effort=0):
+    """Find the most strict relation that holds between `tp1` and `tp2`.
+    
+    `effort` indicates how hard it should search (0 or 1).
+    """
+    result = PRED_UNKNOWN
+    backup = PRED_UNKNOWN
+
+    # If on the same chain, compare pseudo times
+    if tp1 == tp2:
+      result = PRED_SAME_TIME
+    if tp1.on_same_chain(tp2):
+      result = tp1.find_pseudo(tp2)
+
+    # If no answer yet, compare absolute times
+    if result == PRED_UNKNOWN:
+      result = tp1.compare_absolute_times(tp2)
+
+      # If the result is equal, there may still be a path indicating
+      # a temporal order (<= or >=). Set result unknown so that this
+      # will be pursued, but save equal result just in case
+      if result in PREDS_EQUIV and effort > 0:
+        backup = result
+        result = PRED_UNKNOWN
+
+    # If no answer yet, and effort indicates ok to continue, search
+    # for path from tp1 to tp2, or tp2 to tp1
+    if result == PRED_UNKNOWN and effort > 0:
+      path1 = self.search_path(tp1, tp2)
+      if path1:
+        result = path1
+      else:
+        path2 = inverse_reln(self.search_path(tp2, tp1))
+        if path2:
+          result = path2
+        else:
+          result = PRED_UNKNOWN
+
+    # If absolute time comparisons gave equal and the search gave no
+    # more information, use the equal
+    if result == PRED_UNKNOWN and not backup == PRED_UNKNOWN:
+      result = backup
+
+    return result
+  
+
+  def find_point(self, t1, t2, effort=0):
+    """Find the most strict relationship that holds between `t1` and `t2`, which may be either absolute times or points.
+    
+    `effort` indicates how hard it should search (0 or 1).
+    """
+    result = PRED_UNKNOWN
+    if t1 == t2:
+      result = PRED_SAME_TIME
+    elif isinstance(t1, AbsTime) or isinstance(t2, AbsTime):
+      result = self.find_absolute(t1, t2, effort=effort)
+    elif t1 and t2:
+      result = self.find_reln(t1, t2, effort=effort)
+    return result
+  
+
+  def abs_relation(self, abs, tp):
+    """Determine the relation between an absolute time `abs` and a point `tp`."""
+    if not tp:
+      return PRED_UNKNOWN
+    res1 = abs.compare(tp.absolute_min)
+    res2 = abs.compare(tp.absolute_max)
+    if test_point_answer(PRED_EQUAL, res1) and test_point_answer(PRED_EQUAL, res2):
+      return PRED_SAME_TIME
+    elif test_point_answer(PRED_BEFORE, res1):
+      return PRED_BEFORE if res1 in PREDS_EQUIV else res1
+    elif test_point_answer(PRED_AFTER, res2):
+      return PRED_AFTER if res2 in PREDS_EQUIV else res2
+    else:
+      return PRED_UNKNOWN
+  
+
+  def find_absolute(self, a1, a2, effort=0):
+    """Return the relationship between `a1` and `a2`, where one is an absolute time.
+    
+    `effort` indicates how hard it should search (0 or 1).
+    """
+    if isinstance(a1, AbsTime):
+      if isinstance(a2, AbsTime):
+        return a1.compare(a2)
+      elif isinstance(a2, TimePoint):
+        return self.abs_relation(a1, a2)
+    elif isinstance(a1, TimePoint):
+      if isinstance(a2, AbsTime):
+        return inverse_reln(self.abs_relation(a2, a1))
+      elif isinstance(a2, TimePoint):
+        return self.find_point(a1, a2, effort=effort)
+    return PRED_UNKNOWN
+  
+
+  def find_absolute_reln(self, a1, a2, effort=0):
+    """Return the relationship between `a1` and `a2`, which may be events with absolute times.
+    
+    `effort` indicates how hard it should search (0 or 1).
+    """
+    if isinstance(a1, AbsTime) and isinstance(a2, AbsTime):
+      return self.find_absolute(a1, a2, effort=effort)
+    a1start = get_start(a1)
+    a2start = get_start(a2)
+    a1end = get_end(a1)
+    a2end = get_end(a2)
+    res1 = self.find_absolute(a1start, a2end, effort=effort)
+    res2 = self.find_absolute(a1end, a2start, effort=effort)
+
+    # If start and end are equal, equal
+    if test_point_answer(PRED_EQUAL, res1) and test_point_answer(PRED_EQUAL, res2):
+      return PRED_SAME_TIME
+    
+    # If start of 1 after end of 2, after
+    elif test_point_answer(PRED_AFTER, res1):
+      return PRED_AFTER if res1 in PREDS_EQUIV else res1
+    
+    # If end of 1 before start of 2, before
+    elif test_point_answer(PRED_BEFORE, res2):
+      return PRED_BEFORE if res2 in PREDS_EQUIV else res2
+    
+    return PRED_UNKNOWN
+  
+
+  def search_for_duration(self, tp1, tp2, dur, already):
+    """Return minimum and maximum durations if path between `tp1` and `tp2`; None otherwise."""
+    desclist = tp1.descendants + tp1.xdescendants
+    usedur = None
+    curdur = None
+
+    for item in desclist:
+      topt = item.to_tp
+      linkdur = item.calc_duration()
+      # Make sure we don't loop
+      if topt.name not in already:
+        curdur = combine_durations(dur, linkdur) if dur else linkdur
+        # If this is the end point we're looking for, get the best duration so far
+        if topt == tp2:
+          usedur = get_best_duration(usedur, curdur)
+        # Otherwise add this link and continue
+        else:
+          usedur = get_best_duration(usedur, self.search_for_duration(topt, tp2, curdur, already+[topt.name]))
+  
+    return usedur
+  
+
+  def calc_duration(self, tp1, tp2, effort=0):
+    """Determine the duration between two points.
+    
+    If either point doesn't exist, returns unknown. If they exist, it first
+    determines the duration based on their absolute times. If the min is
+    greater than the max, the points are reversed. If we have a range, and
+    the effort level `effort` (0 or 1) indicates to continue trying,
+    ``search_for_duration`` is called to determine the best duration along
+    any path. The best between this and the absolute time duration is returned.
+    """
+    if not tp1 or not tp2:
+      return (0, float('inf'))
+    durans = tp1.duration_between(tp2)
+    durmin, durmax = durans
+    if (not durmin or durmax == float('inf') or not durmax) and effort > 0:
+      durans = get_best_duration(durans, self.search_for_duration(tp1, tp2, None, [tp1.name]))
+    durmin, durmax = durans
+    durmin = 0 if not durmin else durmin
+    durmax = float('inf') if not durmax else durmax
+    return (durmin, durmax)
+  
+
+  def find_relation(self, a1, a2, effort=0):
+    """Return the most strict relation found between `a1` and `a2`, which may be either events or points.
+    
+    It determines relationships between the starts, ends, and start of one, end of the other, and uses
+    those results to determine the actual relation.
+
+    `effort` indicates how hard it should search (0 or 1).
+    """
+    if a1 == a2:
+      return PRED_SAME_TIME
+    if not type(a1) in [EventPoint, TimePoint] or not type(a2) in [EventPoint, TimePoint]:
+      return PRED_UNKNOWN
+    
+    a1start = get_start(a1)
+    a1end = get_end(a1)
+    a2start = get_start(a2)
+    a2end = get_end(a2)
+    result = PRED_UNKNOWN
+    isa1event = isinstance(a1, EventPoint)
+    isa2event = isinstance(a2, EventPoint)
+    e1s2 = self.find_point(a1end, a2start, effort=effort)
+
+    # If end of a1 is before the start of a2, a1 is before a2
+    # if a1 and a2 are both points, we just return the point relation
+    # between the two and skip the rest of this function
+    if test_point_answer(PRED_BEFORE, e1s2) or (not isa1event and not isa2event):
+      if e1s2 in PREDS_EQUIV and (isa1event or isa2event):
+        result = f'{PRED_BEFORE}-{0}'
+      else:
+        result = e1s2
+
+    # If the start of a1 is after the end of a2, a1 is after a2
+    if result == PRED_UNKNOWN and (isa1event or isa2event):
+      s1e2 = self.find_point(a1start, a2end, effort=effort)
+      if test_point_answer(PRED_AFTER, s1e2):
+        if s1e2 in PREDS_EQUIV and (isa1event or isa2event):
+          result = f'{PRED_AFTER}-{0}'
+        else:
+          result = s1e2
+
+    # If the start points are equal, and the end points are equal, a1 = a2
+    if result == PRED_UNKNOWN and (isa1event or isa2event):
+      s1s2 = self.find_point(a1start, a2start, effort=effort)
+      e1e2 = self.find_point(a1end, a2end, effort=effort)
+      if test_point_answer(PRED_EQUAL, s1s2) and test_point_answer(PRED_EQUAL, e1e2):
+        result = PRED_SAME_TIME
+
+    # All other relations require that at least one of the arguments be an event
+    if result == PRED_UNKNOWN and (isa1event or isa2event):
+      strict1 = 0 if s1s2 in PREDS_EQUIV else split_time_pred(s1s2)[1]
+      strict2 = 0 if e1e2 in PREDS_EQUIV else split_time_pred(e1e2)[1]
+      
+      # If the start of the first is after the start of the second,
+      # a1 is either during a2, or overlapped by it
+      if test_point_answer(PRED_AFTER, s1s2):
+        if test_point_answer(PRED_BEFORE, e1e2):
+          result = build_pred(PRED_DURING, strict1=strict1, strict2=strict2)
+        elif test_point_answer(PRED_AFTER, e1e2):
+          result = build_pred(PRED_OVERLAPPED_BY, strict1=strict1, strict2=strict2)
+      
+      # If the start of the first is before the start of the second,
+      # a1 either contains a2, or overlaps it
+      if test_point_answer(PRED_BEFORE, s1s2):
+        if test_point_answer(PRED_BEFORE, e1e2):
+          result = build_pred(PRED_OVERLAPS, strict1=strict1, strict2=strict2)
+        elif test_point_answer(PRED_AFTER, e1e2):
+          result = build_pred(PRED_CONTAINS, strict1=strict1, strict2=strict2)
+
+    return result
+
+
+  def format_timegraph(self, verbose=False, lvl=0):
+    return '\n\n'.join([v.format(verbose=verbose, lvl=lvl+1) for v in self.timegraph.values()])
+  
+
+
+# ``````````````````````````````````````
+# Find subroutines
+# ``````````````````````````````````````
+
+
+
+def combine_path(s1, s2):
+  """Return the strictness value of combining two paths of strictness `s1` and `s2`."""
+  strict_before = f'{PRED_BEFORE}-{1}'
+  if s1 == strict_before or s2 == strict_before or s1 == True or s2 == True or strict_p(s2):
+    return strict_before
+  else:
+    return PRED_BEFORE
+  
+
+def calc_path(sofar, path, link):
+  """Return the strictness value resulting from adding `path` and `link` to `sofar`."""
+  st = link.strict
+  return combine_path(sofar, combine_path(path, st))
+
+
+def check_chain(sofar, tp, item):
+  """Check to see if the `item` link is usable, i.e., its to point is before `tp` on the same chain.
+  
+  If so, return the resulting strictness going to `tp` after `sofar`.
+  """
+  path = item.to_tp.find_pseudo(tp)
+  if test_point_answer(PRED_BEFORE, path):
+    return combine_path(sofar, path)
+  else:
+    return None
+
+
 
 # ``````````````````````````````````````
 # Other
@@ -682,3 +1141,41 @@ class TimeGraph:
 def strict_p(x):
   """Check if strictness value is strict."""
   return x == 1 or x == '1' or x == True
+
+
+def get_start(x):
+  """Get the start of a given concept.
+  
+  `x` is either an event, absolute time, or time point. In the first two
+  cases, return the start time point and the absolute time itself, respectively. Otherwise,
+  just return the time point.
+  """
+  if not x:
+    return None
+  elif isinstance(x, EventPoint):
+    return x.start
+  elif isinstance(x, AbsTime):
+    return x
+  elif isinstance(x, TimePoint):
+    return x
+  else:
+    return None
+
+
+def get_end(x):
+  """Get the end of a given concept.
+  
+  `x` is either an event, absolute time, or time point. In the first two
+  cases, return the end time point and the absolute time itself, respectively. Otherwise,
+  just return the time point.
+  """
+  if not x:
+    return None
+  elif isinstance(x, EventPoint):
+    return x.end
+  elif isinstance(x, AbsTime):
+    return x
+  elif isinstance(x, TimePoint):
+    return x
+  else:
+    return None
