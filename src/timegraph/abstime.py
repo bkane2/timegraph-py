@@ -28,7 +28,7 @@ class AbsTime:
     elif type(time) in [int, float]:
       self.time = self._parse_timestamp(time)
     elif isinstance(time, list) and all([type(x) in [int, str] for x in time]) and len(time) <= 6:
-      time = [int(t) if t.isdigit() else t for t in time]
+      time = [int(t) if (isinstance(t, str) and t.isdigit()) else t for t in time]
       self.time = time
     elif time is None:
       self.time = self._parse_datetime(datetime.now())

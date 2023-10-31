@@ -14,6 +14,9 @@ POINT_LINK_PAIRS = {
 }
 """dict[str, str]: a list of all possible links between TimePoint objects, and the opposite link type for each."""
 
+DEFAULT_EFFORT = 1
+"""int: the effort value used in search algorithms by default."""
+
 
 
 # ``````````````````````````````````````
@@ -26,17 +29,17 @@ DATETIME_ARGS = ['year', 'month', 'day', 'hour', 'minute', 'second']
 """list[str]: all supported datetime arguments for absolute times, in order."""
 
 DATETIME_REQUIRED_ARGS = ['year', 'month', 'day']
-"""list[str]: Mandatory arguments for the datetime class."""
+"""list[str]: mandatory arguments for the datetime class."""
 
 DATETIME_LOWER = {
-  'year' : 1,
+  'year' : 2,
   'month' : 1,
   'day' : 1,
   'hour' : 0,
   'minute' : 0,
   'second' : 0
 }
-"""dict[str, int]: The lowest possible values for each datetime argument."""
+"""dict[str, int]: the lowest possible values for each datetime argument."""
 
 DATETIME_UPPER = {
   'year' : date.today().year,
@@ -46,7 +49,7 @@ DATETIME_UPPER = {
   'minute' : 59,
   'second' : 59
 }
-"""dict[str, int]: The greatest possible values for each datetime argument."""
+"""dict[str, int]: the greatest possible values for each datetime argument."""
 
 
 
@@ -85,14 +88,16 @@ PRED_AT_LEAST_AFTER = 'at-least-after'
 PRED_EXACTLY_AFTER = 'exactly-after'
 PREDS_CONSTRAINED_AFTER = [PRED_AT_MOST_AFTER, PRED_AT_LEAST_AFTER, PRED_EXACTLY_AFTER]
 
+PRED_HAS_DURATION = 'has-duration'
+
 PRED_UNKNOWN = 'unknown'
 
 PREDS_1 = PREDS_EQUIV + PREDS_SEQ + PREDS_CONTAINMENT
 PREDS_2 = PREDS_BETWEEN
 PREDS_3 = PREDS_CONSTRAINED_BEFORE + PREDS_CONSTRAINED_AFTER
 
-PREDS = PREDS_1 + PREDS_2 + PREDS_3 + [PRED_UNKNOWN]
-"""list[str]: All possible predicate stems."""
+PREDS = PREDS_1 + PREDS_2 + PREDS_3 + [PRED_HAS_DURATION, PRED_UNKNOWN]
+"""list[str]: all possible predicate stems."""
 
 INVERSE_PREDS = {
   PRED_BEFORE : PRED_AFTER,
@@ -102,7 +107,7 @@ INVERSE_PREDS = {
   PRED_OVERLAPS : PRED_OVERLAPPED_BY,
   PRED_OVERLAPPED_BY : PRED_OVERLAPS
 }
-"""dict[str, str]: Mappings from particular predicate stems to their inverses."""
+"""dict[str, str]: mappings from particular predicate stems to their inverses."""
 
 
 
@@ -120,4 +125,4 @@ REL_INTERSECTS = 'intersects'
 REL_UNKNOWN = 'unknown'
 
 RELS = [REL_EQUIVALENT, REL_DISJOINT, REL_SUBSUMES, REL_SUBSUMED, REL_INTERSECTS, REL_UNKNOWN]
-"""list[str]: All possible relations between predicates."""
+"""list[str]: all possible relations between predicates."""
