@@ -6,11 +6,17 @@ from timegraph.abstime import *
 
 tg = TimeGraph()
 
+# tg.register_event('e1')
+# tg.register_event('e2')
+# tg.enter('e1', 'before', 'e2')
+# tg.enter('e1', 'before', AbsTime([2023, 1, 1, 1, 1, 1]))
+# tg.enter('e1', 'after', AbsTime([1997, 7, 2, 1, 1, 1]))
+
 tg.register_event('e1')
 tg.register_event('e2')
-tg.enter('e1', 'before', 'e2')
-tg.enter('e1', 'before', AbsTime([2023, 1, 1, 1, 1, 1]))
-tg.enter('e1', 'after', AbsTime([1997, 7, 2, 1, 1, 1]))
+tg.register_event('e3')
+tg.enter('e1', 'between', 'e2', 'e3')
+
 
 # tg.add_single('tp1')
 # tg.add_single('tp2')

@@ -50,6 +50,9 @@ class TimePoint:
   """
 
   def __init__(self, name, chain=None, pseudo=PSEUDO_INIT):
+    assert (isinstance(name, str) and
+            (isinstance(chain, MetaNode) or chain is None) and
+            type(pseudo) in [int, float])
     self.name = name
     self.chain = chain
     self.pseudo = pseudo
@@ -79,6 +82,7 @@ class TimePoint:
 
   def pseudo_between(self, tp):
     """Calculate a pseudo time between another time point using 90% of the difference, renumbering the chain if no space left between."""
+    assert isinstance(tp, TimePoint)
     p1 = self.pseudo
     p2 = tp.pseudo
 
@@ -100,12 +104,14 @@ class TimePoint:
     The test is done by checking to see if the pseudo time of `tp` fits in the range of
     pseudos defined by the min and max pseudos of this point.
     """
+    assert isinstance(tp, TimePoint)
     p2 = tp.pseudo
     return p2 > self.min_pseudo and p2 < self.max_pseudo
   
 
   def find_pseudo(self, tp):
     """Find the most strict relation possible between this point and `tp` using their pseudo times."""
+    assert isinstance(tp, TimePoint) 
     p1 = self.pseudo
     p2 = tp.pseudo
     if p1 == p2:
@@ -120,6 +126,7 @@ class TimePoint:
 
   def on_same_chain(self, tp):
     """Check if this point is on the same chain as `tp`."""
+    assert isinstance(tp, TimePoint)
     return self.chain == tp.chain
 
 
@@ -135,6 +142,7 @@ class TimePoint:
 
   def adjacent(self, tp):
     """Check whether this point and `tp` are next to each other on the chain with no intervening points."""
+    assert isinstance(tp, TimePoint) 
     return self.first_desc() == tp
   
 
@@ -167,54 +175,64 @@ class TimePoint:
     If this were happening within the same chain, the first point would be kept, and the others made equal
     to it, so this situation would not arise.
     """
-    mn = self.chain
-    if self.name == mn.first.name:
+    meta = self.chain
+    first = meta.first
+    if self.name == first.name:
       newp = self.first_desc()
-      mn.first = newp
+      meta.first = newp
       if newp.min_pseudo == self.min_pseudo:
         newp.first_desc().prop_min(newp.pseudo)
   
 
   def add_ancestor_link(self, timelink):
     """Add a link on the in chain ancestor list."""
+    assert isinstance(timelink, TimeLink)
     self.ancestors.add(timelink)
 
 
   def add_descendant_link(self, timelink):
     """Add a link on the in chain descendant list."""
+    assert isinstance(timelink, TimeLink)
     self.descendants.add(timelink)
 
 
   def add_xancestor_link(self, timelink):
     """Add a link on the cross chain ancestor list."""
+    assert isinstance(timelink, TimeLink)
     self.xancestors.add(timelink)
 
 
   def add_xdescendant_link(self, timelink):
     """Add a link on the cross chain descendant list."""
+    assert isinstance(timelink, TimeLink)
     self.xdescendants.add(timelink)
 
 
   def prop_min(self, newmin):
     """Propagate minimum pseudo time forward along descendants until it reaches a minimum greater than it."""
+    assert type(newmin) in [int, float]
     if newmin > float('-inf') and newmin >= self.min_pseudo:
       self.min_pseudo = newmin
       if self.descendants:
         item = self.descendants[0]
+        assert isinstance(item, TimeLink)
         item.to_tp.prop_min(newmin)
 
 
   def prop_max(self, newmax):
     """Propagate maximum pseudo time backward along ancestors until it reaches a maximum less than it."""
+    assert type(newmax) in [int, float]
     if newmax < float('inf') and newmax <= self.max_pseudo:
       self.max_pseudo = newmax
       if self.ancestors:
         item = self.ancestors[0]
+        assert isinstance(item, TimeLink)
         item.from_tp.prop_max(newmax)
 
 
   def add_strictness(self, tp):
     """Modify the max pseudo of self and the min pseudo of `tp` to ensure that they cannot be equal."""
+    assert isinstance(tp, TimePoint)
     oldmin = tp.min_pseudo
     oldmax = self.max_pseudo
     
@@ -239,10 +257,13 @@ class TimePoint:
     # Propagate only to first in chain descendant - since it is recursive it will
     # get the rest of the chain anyway
     if dlist:
-      dlist[0].prop_min_to_point()
+      ditem = dlist[0]
+      assert isinstance(ditem, TimeLink)
+      ditem.prop_min_to_point()
     
     # Propagate to all x-descendants
     for xitem in xdlist:
+      assert isinstance(xitem, TimeLink)
       xitem.prop_min_to_point()
 
 
@@ -254,15 +275,19 @@ class TimePoint:
     # Propagate only to first in chain ancestor - since it is recursive it will
     # get the rest of the chain anyway
     if alist:
-      alist[0].prop_max_to_point(oldabs)
+      aitem = alist[0]
+      assert isinstance(aitem, TimeLink)
+      aitem.prop_max_to_point(oldabs)
     
     # Propagate to all x-ancestors
     for xitem in xalist:
+      assert isinstance(xitem, TimeLink)
       xitem.prop_max_to_point(oldabs)
 
 
   def update_absolute_min(self, abs):
     """Add a new absolute minimum time to this point."""
+    assert isinstance(abs, AbsTime)
     max = self.absolute_max
     oldabs = self.absolute_min
     newabs = oldabs.merge_abs_min(abs, max)
@@ -273,6 +298,7 @@ class TimePoint:
 
   def update_absolute_max(self, abs):
     """Add a new absolute maximum time to this point."""
+    assert isinstance(abs, AbsTime)
     min = self.absolute_min
     oldabs = self.absolute_max
     newabs = oldabs.merge_abs_max(abs, min)
@@ -283,6 +309,7 @@ class TimePoint:
 
   def duration_between(self, tp):
     """Determine the duration between this and another point based on their absolute times."""
+    assert isinstance(tp, TimePoint)
     min1 = self.absolute_min
     max1 = self.absolute_max
     min2 = tp.absolute_min
@@ -292,6 +319,7 @@ class TimePoint:
 
   def compare_absolute_times(self, tp):
     """Return the relation between this point and `tp` based on their absolute times."""
+    assert isinstance(tp, TimePoint)
     absmin1 = self.absolute_min
     absmax1 = self.absolute_max
     absmin2 = tp.absolute_min
@@ -320,13 +348,14 @@ class TimePoint:
   
 
   def __eq__(self, other):
+    assert isinstance(other, TimePoint)
     return self.chain == other.chain and self.pseudo == other.pseudo
   
 
   def format(self, verbose=False, lvl=0):
     parts = []
     parts.append(f'{indent(lvl)}Node {self.name}')
-    parts.append(f'{indent(lvl)}Chain {self.chain.chain_number}')
+    parts.append(f'{indent(lvl)}Chain {self.chain}')
     parts.append(f'{indent(lvl)}Pseudo {self.pseudo}')
     parts.append(f'{indent(lvl)}Min-pseudo {self.min_pseudo}')
     parts.append(f'{indent(lvl)}Max-pseudo {self.max_pseudo}')
@@ -388,6 +417,9 @@ class TimeLink:
   """
 
   def __init__(self, from_tp=None, to_tp=None, strict=False):
+    assert ((isinstance(from_tp, TimePoint) or from_tp is None) and
+            (isinstance(to_tp, TimePoint) or to_tp is None) and
+            isinstance(strict, bool))
     self.from_tp = from_tp
     self.to_tp = to_tp
     self.strict = strict
@@ -396,19 +428,19 @@ class TimeLink:
 
 
   def from_chain_number(self):
-    return self.from_tp.chain.chain_number
+    return self.from_tp.chain.chain_number if self.from_tp else None
   
 
   def from_pseudo(self):
-    return self.from_tp.pseudo
+    return self.from_tp.pseudo if self.from_tp else None
   
 
   def to_chain_number(self):
-    return self.to_tp.chain.chain_number
+    return self.to_tp.chain.chain_number if self.to_tp else None
   
 
   def to_pseudo(self):
-    return self.to_tp.pseudo
+    return self.to_tp.pseudo if self.to_tp else None
   
 
   def prop_min_to_point(self):
@@ -431,6 +463,7 @@ class TimeLink:
 
   def prop_max_to_point(self, oldabs):
     """Propagate the maximum absolute time to the previous ancestor (the to point of this link)."""
+    assert isinstance(oldabs, AbsTime)
     pt1 = self.to_tp
     pt2 = self.from_tp
     pt1abs = pt1.absolute_max
@@ -458,6 +491,7 @@ class TimeLink:
 
   def update_duration_min(self, d):
     """Add a minimum duration to this link and propagate absolute time if necessary."""
+    assert type(d) in [int, float]
     if (d > 0 and not self.strict) or (not self.duration_min or d > self.duration_min):
       tp1 = self.from_tp
       tp2 = self.to_tp
@@ -473,11 +507,13 @@ class TimeLink:
 
   def update_duration_max(self, d):
     """Add a maximum duration to this link."""
+    assert type(d) in [int, float]
     if not self.duration_max or d < self.duration_max:
       self.duration_max = d
 
 
   def __eq__(self, other):
+    assert isinstance(other, TimeLink)
     return (self.from_chain_number() == other.from_chain_number() and
             self.from_pseudo() == other.from_pseudo() and
             self.to_chain_number() == other.to_chain_number() and
@@ -506,7 +542,7 @@ class TimeLink:
 
 class TimeLinkList(UserList):
   """A list of time links (a wrapper around a basic Python list)."""
-  
+
   def add(self, item):
     """Insert `item` at the appropriate place in the list.
     
@@ -517,6 +553,7 @@ class TimeLinkList(UserList):
       if not llist:
         return True
       lk = llist[0]
+      assert isinstance(lk, TimeLink) and isinstance(item, TimeLink)
       return (lk.from_chain_number() > item.from_chain_number()
             or (lk.from_chain_number() == item.from_chain_number()
                 and (lk.from_pseudo() > item.from_pseudo()
@@ -527,6 +564,7 @@ class TimeLinkList(UserList):
     
     def ins_here(llist, item):
       lk = llist[0]
+      assert isinstance(lk, TimeLink) and isinstance(item, TimeLink)
       if lk == item:
         if item.strict:
           lk.strict = True
@@ -587,6 +625,9 @@ class MetaNode:
   """
 
   def __init__(self, chain_number, first=None, connections=TimeLinkList()):
+    assert (isinstance(chain_number, int) and
+            (isinstance(first, TimePoint) or first is None) and
+            isinstance(connections, TimeLinkList))
     self.chain_number = chain_number
     self.first = first
     self.connections = connections
@@ -602,14 +643,21 @@ class MetaNode:
     and they will be handled later anyway.
     """
     def renumber_next(last, dlist):
+      assert isinstance(last, TimePoint) and isinstance(dlist, TimeLinkList)
       if dlist:
-        p = dlist[0].to_tp
+        ditem = dlist[0]
+        assert isinstance(ditem, TimeLink)
+        p = ditem.to_tp
         p.pseudo = last.pseudo_after()
         renumber_next(p, p.descendants)
 
     f = self.first
     f.pseudo = PSEUDO_INIT
     renumber_next(f, f.descendants)
+
+  
+  def __str__(self):
+    return str(self.chain_number)
 
 
 
@@ -639,6 +687,9 @@ class EventPoint:
   """
 
   def __init__(self, name, start=None, end=None):
+    assert (isinstance(name, str) and
+            (isinstance(start, TimePoint) or start is None) and
+            (isinstance(end, TimePoint) or end is None))
     self.name = name
     self.start = start if start else TimePoint(name+'start')
     self.end = end if end else TimePoint(name+'end')
@@ -692,16 +743,19 @@ class TimeGraph:
 
   def time_point(self, name):
     """Return the time point corresponding to `name` if there is one, otherwise None."""
+    assert isinstance(name, str)
     return self.timegraph[name] if name in self.timegraph else None
   
 
   def time_chain(self, chain_number):
     """Return the meta node corresponding to `chain_number` if there is one, otherwise None."""
+    assert isinstance(chain_number, int)
     return self.metagraph[chain_number] if chain_number in self.metagraph else None
   
 
   def event_point(self, name):
     """Return the event point corresponding to `name`, if there is one, otherwise None."""
+    assert isinstance(name, str)
     return self.events[name] if name in self.events else None
   
 
@@ -712,6 +766,7 @@ class TimeGraph:
 
   def add_meta_link(self, timelink):
     """Add a link to the meta graph for the appropriate chain."""
+    assert isinstance(timelink, TimeLink)
     if not timelink.from_chain_number() == timelink.to_chain_number():
       mn = self.time_chain(timelink.from_chain_number())
       if mn:
@@ -720,6 +775,7 @@ class TimeGraph:
 
   def remove_meta_link(self, timelink):
     """Remove a link from the meta graph."""
+    assert isinstance(timelink, TimeLink)
     if not timelink.from_chain_number() == timelink.to_chain_number():
       mn = self.time_chain(timelink.from_chain_number())
       if mn:
@@ -731,6 +787,7 @@ class TimeGraph:
     
     If the two points are on different chains, a meta link is also added.
     """
+    assert isinstance(tp1, TimePoint) and isinstance(tp2, TimePoint) and isinstance(strict12, int)
     if not tp1 == tp2:
       tl = TimeLink(from_tp=tp1, to_tp=tp2, strict=strict_p(strict12))
       if tp1.chain == tp2.chain:
@@ -745,6 +802,7 @@ class TimeGraph:
 
   def remove_link(self, timelink, linklist):
     """Remove `timelink` from `linklist`, as well as removing the meta-link if there is one."""
+    assert isinstance(timelink, TimeLink) and isinstance(linklist, TimeLinkList)
     self.remove_meta_link(timelink)
     linklist.remove(timelink)
 
@@ -758,10 +816,13 @@ class TimeGraph:
     If `type` is "(x)ascendants", for each link in `tp1`'s (x)ancestors list, the "from" point descendant list
     has this link removed, and then the link is added using `tp2` as the descendant.
     """
+    assert isinstance(tp1, TimePoint) and isinstance(tp2, TimePoint)
     if type not in POINT_LINK_PAIRS.keys():
       raise Exception('Invalid type argument')
+    
     linklist = getattr(tp1, type)
     for link in linklist:
+      assert isinstance(link, TimeLink)
       if 'descendant' in type:
         tp = link.to_tp
       else:
@@ -781,6 +842,7 @@ class TimeGraph:
 
   def find_link(self, tp1, tp2):
     """Find the link between `tp1`, and `tp2`, adding a link if none exists."""
+    assert isinstance(tp1, TimePoint) and isinstance(tp2, TimePoint)
     chain2 = tp2.chain
     pseudo2 = tp2.pseudo
     if tp1.on_same_chain(tp2):
@@ -789,6 +851,7 @@ class TimeGraph:
       dlist = tp1.xdescendants
     link = None
     for item in dlist:
+      assert isinstance(item, TimeLink)
       if item.to_chain_number() == chain2.chain_number and item.to_pseudo() == pseudo2:
         link = item
         break
@@ -804,6 +867,7 @@ class TimeGraph:
     Ensures that only links with points on the same chain go into the new in-chain lists,
     and only those with different chains go on the cross-chain lists.
     """
+    assert isinstance(tp1, TimePoint) and isinstance(tp2, TimePoint)
     self.update_links(tp1, tp2, 'ancestors')
     self.update_links(tp1, tp2, 'xancestors')
     self.update_links(tp1, tp2, 'descendants')
@@ -812,6 +876,7 @@ class TimeGraph:
 
   def add_single(self, tpname):
     """Add a single point to the net on a new chain."""
+    assert isinstance(tpname, str)
     tp = TimePoint(tpname, chain=self.newchain())
     self.timegraph[tpname] = tp
     tp.update_first()
@@ -820,6 +885,7 @@ class TimeGraph:
 
   def add_absolute_min(self, t, abs):
     """Add an absolute minimum time to `t` (creating the point if it doesn't exist)."""
+    assert type(t) in [str, TimePoint] and isinstance(abs, AbsTime)
     if isinstance(t, str):
       tp = self.time_point(t)
       if tp is None:
@@ -831,6 +897,7 @@ class TimeGraph:
 
   def add_absolute_max(self, t, abs):
     """Add an absolute maximum time to `t` (creating the point if it doesn't exist)."""
+    assert type(t) in [str, TimePoint] and isinstance(abs, AbsTime)
     if isinstance(t, str):
       tp = self.time_point(t)
       if tp is None:
@@ -842,12 +909,14 @@ class TimeGraph:
   
   def new_duration_min(self, tp1, tp2, d):
     """Create a duration minimum between `tp1` and `tp2`."""
+    assert isinstance(tp1, TimePoint) and isinstance(tp2, TimePoint) and type(d) in [int, float]
     link = self.find_link(tp1, tp2)
     link.update_duration_min(d)
 
 
   def add_duration_min(self, tpname1, tpname2, d):
     """Add a duration minimum between `tpname1` and `tpname2`."""
+    assert isinstance(tpname1, str) and isinstance(tpname2, str) and type(d) in [int, float]
     if tpname1 not in self.timegraph or tpname2 not in self.timegraph:
       raise Exception(f'One of {tpname1} or {tpname2} does not exist in the timegraph.')
     tp1 = self.timegraph[tpname1]
@@ -857,12 +926,14 @@ class TimeGraph:
 
   def new_duration_max(self, tp1, tp2, d):
     """Create a duration maximum between `tp1` and `tp2`."""
+    assert isinstance(tp1, TimePoint) and isinstance(tp2, TimePoint) and type(d) in [int, float]
     link = self.find_link(tp1, tp2)
     link.update_duration_max(d)
 
 
   def add_duration_max(self, tpname1, tpname2, d):
     """Add a duration maximum between `tpname1` and `tpname2`."""
+    assert isinstance(tpname1, str) and isinstance(tpname2, str) and type(d) in [int, float]
     if tpname1 not in self.timegraph or tpname2 not in self.timegraph:
       raise Exception(f'One of {tpname1} or {tpname2} does not exist in the timegraph.')
     tp1 = self.timegraph[tpname1]
@@ -882,6 +953,7 @@ class TimeGraph:
     
     `sofar` is the strictness value so far in the search.
     """
+    assert isinstance(tp1, TimePoint) and isinstance(tp2, TimePoint)
     chain1 = tp1.chain
     chain2 = tp2.chain
     xlist = None
@@ -898,6 +970,7 @@ class TimeGraph:
     # For each connection that the chain of tp1 has to another chain:
     if not res and xlist:
       for item in xlist:
+        assert isinstance(item, TimeLink)
         frompt = item.from_tp
         topt = item.to_tp
         path1 = tp1.find_pseudo(frompt)
@@ -935,6 +1008,7 @@ class TimeGraph:
 
   def search_path(self, tp1, tp2):
     """Return ``None`` if there is no path from `tp1` to `tp2`; ``before-1`` or ``before`` if there is."""
+    assert isinstance(tp1, TimePoint) and isinstance(tp2, TimePoint)
     self.rel_table = {}
     res = self.search_meta(tp1, tp2, [tp1.chain.chain_number], None)
     self.rel_table = {}
@@ -946,6 +1020,7 @@ class TimeGraph:
     
     `effort` indicates how hard it should search (0 or 1).
     """
+    assert isinstance(tp1, TimePoint) and isinstance(tp2, TimePoint)
     result = PRED_UNKNOWN
     backup = PRED_UNKNOWN
 
@@ -992,6 +1067,7 @@ class TimeGraph:
     
     `effort` indicates how hard it should search (0 or 1).
     """
+    assert type(t1) in [TimePoint, AbsTime] and type(t2) in [TimePoint, AbsTime]
     result = PRED_UNKNOWN
     if t1 == t2:
       result = PRED_SAME_TIME
@@ -1004,6 +1080,7 @@ class TimeGraph:
 
   def abs_relation(self, abs, tp):
     """Determine the relation between an absolute time `abs` and a point `tp`."""
+    assert isinstance(abs, AbsTime) and (isinstance(tp, TimePoint) or tp is None)
     if not tp:
       return PRED_UNKNOWN
     res1 = abs.compare(tp.absolute_min)
@@ -1067,11 +1144,13 @@ class TimeGraph:
 
   def search_for_duration(self, tp1, tp2, dur, already):
     """Return minimum and maximum durations if path between `tp1` and `tp2`; None otherwise."""
+    assert isinstance(tp1, TimePoint) and isinstance(tp2, TimePoint) and type(dur) in [int, float]
     desclist = tp1.descendants + tp1.xdescendants
     usedur = None
     curdur = None
 
     for item in desclist:
+      assert isinstance(item, TimeLink)
       topt = item.to_tp
       linkdur = item.calc_duration()
       # Make sure we don't loop
@@ -1097,6 +1176,7 @@ class TimeGraph:
     ``search_for_duration`` is called to determine the best duration along
     any path. The best between this and the absolute time duration is returned.
     """
+    assert (isinstance(tp1, TimePoint) or tp1 is None) and (isinstance(tp2, TimePoint) or tp2 is None)
     if not tp1 or not tp2:
       return (0, float('inf'))
     durans = tp1.duration_between(tp2)
@@ -1187,6 +1267,7 @@ class TimeGraph:
     remains consistent after the entry. For example, if a <= b and we add a >= b, evaluation is
     unknown, but to remain consistent, it must be a = b.
     """
+    assert type(f) in [TimePoint, AbsTime] and type(l) in [TimePoint, AbsTime]
     oldreln = self.find_point(f, l, effort=effort)
     if reln == PRED_BEFORE:
       return oldreln in PREDS_EQUIV + [PRED_AFTER, f'{PRED_AFTER}-{0}', f'{PRED_BEFORE}-{0}']
@@ -1198,13 +1279,14 @@ class TimeGraph:
 
   def update_point(self, tpname, newtp):
     """Update the pointer for the point named `tpname` in the timegraph to `newtp`."""
+    assert isinstance(tpname, str) and isinstance(newtp, TimePoint)
     newtp.alternate_names.add(tpname)
-    if tpname in self.timegraph:
-      self.timegraph[tpname] = newtp
+    self.timegraph[tpname] = newtp
 
 
   def merge_names(self, tp1, tp2):
     """Merge the names of `tp2` into `tp1`."""
+    assert isinstance(tp1, TimePoint) and isinstance(tp2, TimePoint)
     for tpname in tp2.alternate_names:
       self.update_point(tpname, tp1)
     tp1.alternate_names = tp1.alternate_names.union(tp2.alternate_names)
@@ -1217,12 +1299,14 @@ class TimeGraph:
     First copy all the link information from the second point to the first, then
     make the second point actually point to the first.
     """
+    assert isinstance(tp1, TimePoint) and isinstance(tp2, TimePoint)
     self.copy_links(tp1, tp2)
     self.merge_names(tp1, tp2)
 
 
   def get_path(self, tp1, tp2):
     """Return a list containing all points in the same chain from `tp1` to `tp2`, inclusive."""
+    assert isinstance(tp1, TimePoint) and isinstance(tp2, TimePoint)
     next = tp1.descendants[0].to_tp if tp1.descendants else None
     if tp1 == tp2:
       return [tp1]
@@ -1234,6 +1318,7 @@ class TimeGraph:
 
   def collapse_chain(self, tp1, tp2):
     """Make two points on the same chain equal (all points between must be made equal as well)."""
+    assert isinstance(tp1, TimePoint) and isinstance(tp2, TimePoint)
     min1 = tp1.min_pseudo
     min2 = tp2.min_pseudo
     max1 = tp1.max_pseudo
@@ -1267,6 +1352,7 @@ class TimeGraph:
     the first by `tp2`'s first descendant. Any links `tp2` has are copied to `tp1`,
     and `tp2` is replaced by `tp1` in the time graph.
     """
+    assert isinstance(tp1, TimePoint) and isinstance(tp2, TimePoint)
     absmin2 = tp2.absolute_min
     absmax2 = tp2.absolute_max
 
@@ -1286,6 +1372,7 @@ class TimeGraph:
     `t1` is either a time point, or a name if no time point yet exists.
     `tp2` is the time point for the second point, which must already exist.
     """
+    assert type(t1) in [str, TimePoint] and isinstance(tp2, TimePoint)
     # If t1 is new, just make it point to tp2
     if isinstance(t1, str) and not t1 in self.timegraph:
       self.update_point(t1, tp2)
@@ -1310,6 +1397,7 @@ class TimeGraph:
 
   def add_before_same_chain(self, f, l, strictfl):
     """Set the chain of point `f` to be the same as `l`'s, and set its pseudo time to be before `l`'s."""
+    assert isinstance(f, TimePoint) and isinstance(l, TimePoint) and isinstance(strictfl, int)
     f.chain = l.chain
     f.pseudo = l.pseudo_before()
 
@@ -1327,6 +1415,7 @@ class TimeGraph:
 
   def add_after_same_chain(self, l, f, strictfl):
     """Set the chain of point `l` to be the same as `f`'s, and set its pseudo time to be after `f`'s."""
+    assert isinstance(l, TimePoint) and isinstance(f, TimePoint) and isinstance(strictfl, int)
     l.chain = f.chain
     l.pseudo = f.pseudo_after()
 
@@ -1342,6 +1431,8 @@ class TimeGraph:
 
   def add_between_same_chain(self, m, f, l, strictfm, strictml):
     """Set the chain of point `m` to be the same as `f` and `l`, and set its pseudo time to be between."""
+    assert (isinstance(m, TimePoint) and isinstance(f, TimePoint) and isinstance(l, TimePoint) and
+            isinstance(strictfm, int) and isinstance(strictml, int))
     m.chain = f.chain
     m.pseudo = f.pseudo_between(l)
 
@@ -1370,6 +1461,7 @@ class TimeGraph:
 
   def add_on_new_chain(self, tp):
     """Set the chain of `tp` to be a new chain, and set the first indicator for that new chain."""
+    assert isinstance(tp, TimePoint)
     tp.chain = self.newchain()
     tp.pseudo = PSEUDO_INIT
     tp.update_first()
@@ -1381,10 +1473,11 @@ class TimeGraph:
     If `fname` doesn't exist, it is added on the same chain as `lname` if possible.
     Otherwise it starts a new chain. A link is added between them reflecting the strictness.
     """
+    assert isinstance(fname, str) and isinstance(lname, str) and isinstance(strict, int)
     f = self.time_point(fname)
     l = self.time_point(lname)
 
-    if l is None:
+    if l is None or not isinstance(l, TimePoint):
       raise Exception(f"Time point {lname} doesn't exist in timegraph.")
     
     # if first is new, create it
@@ -1414,10 +1507,11 @@ class TimeGraph:
     If `lname` doesn't exist, it is added to the same chain as `fname` if possible.
     Otherwise it starts a new chain. A link is added between them reflecting the strictness.
     """
+    assert isinstance(lname, str) and isinstance(fname, str) and isinstance(strict, int)
     l = self.time_point(lname)
     f = self.time_point(fname)
 
-    if f is None:
+    if f is None or not isinstance(f, TimePoint):
       raise Exception(f"Time point {fname} doesn't exist in timegraph.")
     
     # if last is new, create it
@@ -1449,13 +1543,15 @@ class TimeGraph:
     to minimize chains. If this is not possible, a new chain is started. Links are created
     between first and middle, and middle and last, reflecting the strictness given.
     """
+    assert (isinstance(mname, str) and isinstance(fname, str) and isinstance(lname, str) and
+            isinstance(strictfm, int) and isinstance(strictml, int))
     m = self.time_point(mname)
     f = self.time_point(fname)
     l = self.time_point(lname)
 
-    if f is None:
+    if f is None or not isinstance(f, TimePoint):
       raise Exception(f"Time point {fname} doesn't exist in timegraph.")   
-    if l is None:
+    if l is None or not isinstance(l, TimePoint):
       raise Exception(f"Time point {lname} doesn't exist in timegraph.") 
     
     # if middle is new, create it, unless it's just being set equal to one of the other points
@@ -1510,15 +1606,16 @@ class TimeGraph:
 
   def check_equal(self, name1, name2):
     """Ensure that the call to ``add_equal`` will have the correct arguments."""
+    assert isinstance(name1, str) and isinstance(name2, str)
     tp1 = self.time_point(name1)
     tp2 = self.time_point(name2)
-    if tp1 is None:
+    if tp1 is None or not isinstance(tp1, TimePoint):
       # if tp1 is new and tp2 is new, add tp2 as a new point
-      if tp2 is None:
+      if tp2 is None or not isinstance(tp2, TimePoint):
         tp2 = self.add_single(name2)
       self.add_equal(name1, tp2)
     # if tp1 exists and tp2 is new, reverse the order of the arguments
-    elif tp2 is None:
+    elif tp2 is None or not isinstance(tp2, TimePoint):
       self.add_equal(name2, tp1)
     # oherwise, both exist
     else:
@@ -1530,6 +1627,7 @@ class TimeGraph:
 
   def check_before(self, fname, lname, strictfl):
     """Ensure that the arguments are correct for ``add_before``."""
+    assert isinstance(fname, str) and isinstance(lname, str) and isinstance(strictfl, int)
     f = self.time_point(fname)
     l = self.time_point(lname)
 
@@ -1555,6 +1653,7 @@ class TimeGraph:
 
   def check_after(self, lname, fname, strictfl):
     """Ensure that the arguments are correct for ``add_after``."""
+    assert isinstance(lname, str) and isinstance(fname, str) and isinstance(strictfl, int)
     l = self.time_point(lname)
     f = self.time_point(fname)
 
@@ -1580,6 +1679,8 @@ class TimeGraph:
 
   def handle_between(self, mname, fname, lname, strictfm, strictml):
     """Attempt to minimize the number of chains by using the appropriate combination of before, after, and between."""
+    assert (isinstance(mname, str) and isinstance(fname, str) and isinstance(lname, str) and
+            isinstance(strictfm, int) and isinstance(strictml, int))
     m = self.time_point(mname)
     f = self.time_point(fname)
     l = self.time_point(lname)
@@ -1606,6 +1707,8 @@ class TimeGraph:
 
   def check_between(self, mname, fname, lname, strictfm, strictml):
     """Prepare to call ``add_between`` which requires that first and last points exist."""
+    assert (isinstance(mname, str) and isinstance(fname, str) and isinstance(lname, str) and
+            isinstance(strictfm, int) and isinstance(strictml, int))
     m = self.time_point(mname)
     f = self.time_point(fname)
     l = self.time_point(lname)
@@ -1617,7 +1720,7 @@ class TimeGraph:
       strictml = 0
     
     # if middle doesn't exist, make sure first/last exist (adding them if not), and add middle between
-    if m is None:
+    if m is None or not isinstance(m, TimePoint):
       self.check_before(fname, lname, combine_strict(strictfm, strictml))
       self.handle_between(mname, fname, lname, strictfm, strictml)
 
@@ -1635,6 +1738,9 @@ class TimeGraph:
 
   def enter_point(self, tpname1, stem, tpname2, tpname3=None, strict1=-1, strict2=-1):
     """Enter a particular relation between time points (no events at this stage)."""
+    assert (isinstance(tpname1, str) and isinstance(stem, str) and isinstance(tpname2, str) and
+            (isinstance(tpname3, str) or tpname3 is None) and
+            isinstance(strict1, int) and isinstance(strict2, int))
     if stem == PRED_BETWEEN or tpname1 != tpname2:
       if not stem:
         self.add_single(tpname1)
@@ -1654,6 +1760,7 @@ class TimeGraph:
 
   def register_event(self, eventname):
     """Set up an event point with its start and end timepoints, if one does not already exist."""
+    assert isinstance(eventname, str)
     e = self.event_point(eventname)
     if e is None:
       e = EventPoint(eventname)
@@ -1663,13 +1770,14 @@ class TimeGraph:
 
   def add_event(self, e):
     """Enter a link between the start and end points of an event if one doesn't already exist."""
-    if not isinstance(e, EventPoint):
-      raise Exception(f'Input must be of type EventPoint.')
-    self.enter_point(e.start, PRED_BEFORE, e.end)
+    assert isinstance(e, EventPoint)
+    self.enter_point(e.start.name, PRED_BEFORE, e.end.name)
 
 
   def enter_duration_min(self, a1, a2, dur):
     """Prepare the arguments for the low-level routine ``add_duration_min``."""
+    assert (type(a1) in [str, TimePoint, EventPoint] and type(a2) in [str, TimePoint, EventPoint] and
+            type(dur) in [int, float])
     tpname1 = get_end_name(a1)
     tpname2 = get_start_name(a2)
     self.add_duration_min(tpname1, tpname2, dur)
@@ -1677,6 +1785,8 @@ class TimeGraph:
 
   def enter_duration_max(self, a1, a2, dur):
     """Prepare the arguments for the low-level routine ``add_duration_max``."""
+    assert (type(a1) in [str, TimePoint, EventPoint] and type(a2) in [str, TimePoint, EventPoint] and
+            type(dur) in [int, float])
     tpname1 = get_end_name(a1)
     tpname2 = get_start_name(a2)
     self.add_duration_max(tpname1, tpname2, dur)
@@ -1692,6 +1802,11 @@ class TimeGraph:
     -----
     At this stage there are no absolute time arguments.
     """
+    assert (type(a1) in [str, TimePoint, EventPoint] and
+            isinstance(stem, str) and
+            type(a2) in [str, TimePoint, EventPoint] and
+            (type(a3) in [str, TimePoint, EventPoint] or a3 is None) and
+            isinstance(strict1, int) and isinstance(strict2, int))
     a1start = get_start_name(a1)
     a2start = get_start_name(a2)
     a3start = get_start_name(a3)
@@ -1768,8 +1883,11 @@ class TimeGraph:
 
     The `a3` argument is ignored, although it probably shouldn't be (TODO).
     """
-    if not isinstance(a2, AbsTime):
-      raise Exception('Argument a2 must be of type AbsTime.')
+    assert (type(a1) in [str, TimePoint, EventPoint] and
+            isinstance(stem, str) and
+            isinstance(a2, AbsTime) and
+            (type(a3) in [str, TimePoint, EventPoint] or a3 is None) and
+            isinstance(strict1, int) and isinstance(strict2, int))
     
     # a2 is absolute time; if a1 is also, don't do anything
     if isinstance(a1, AbsTime):
@@ -1831,6 +1949,11 @@ class TimeGraph:
 
   def enter_between(self, a1, stem, a2, a3=None, strict1=-1, strict2=-1):
     """Enter the between relation when none of the arguments are absolute times."""
+    assert (type(a1) in [str, TimePoint, EventPoint] and
+            isinstance(stem, str) and
+            type(a2) in [str, TimePoint, EventPoint] and
+            (type(a3) in [str, TimePoint, EventPoint] or a3 is None) and
+            isinstance(strict1, int) and isinstance(strict2, int))
     a1start = get_start_name(a1)
     a1end = get_end_name(a1)
     a2end = get_end_name(a2)
@@ -1874,7 +1997,7 @@ class TimeGraph:
   def enter(self, a1, reln, a2, a3=None):
     """Enter a particular temporal relationship for two (or three) arguments into the graph.
 
-    Each argument may be either a string, an EventPoint, or an AbsTime. By default, a string will
+    Each argument may be either a string, a TimePoint, an EventPoint, or an AbsTime. By default, a string will
     be interpreted as the name of a TimePoint that is to be created, or already exists in the graph.
     However, if the name corresponds to an already registered EventPoint (see ``register_event``), then
     that EventPoint will be used.
@@ -1896,21 +2019,24 @@ class TimeGraph:
     bool
       Whether a relation was successfully entered.
     """
+    assert (type(a1) in [str, TimePoint, EventPoint, AbsTime] and
+            isinstance(reln, str) and
+            type(a2) in [str, TimePoint, EventPoint, AbsTime] and
+            (type(a3) in [str, TimePoint, EventPoint, AbsTime] or a3 is None))
     stem, s1, s2 = split_time_pred(reln) 
     enter_res = False
 
     if self.is_event(a1):
       a1 = self.event_point(a1)
-      self.add_event(a1)
     if self.is_event(a2):
       a2 = self.event_point(a2)
-      self.add_event(a2)
     if a3 is not None and self.is_event(a3):
       a3 = self.event_point(a3)
-      self.add_event(a3)
-    
+      
     if stem in PREDS_SEQ + PREDS_CONTAINMENT:
       if a3 is None or isinstance(a3, EventPoint):
+        if isinstance(a3, EventPoint):
+          self.add_event(a3)
         if isinstance(a2, AbsTime):
           self.enter_absolute(a1, stem, a2, a3, s1, s2)
         elif isinstance(a1, AbsTime):
@@ -1968,6 +2094,7 @@ def combine_path(s1, s2):
 
 def calc_path(sofar, path, link):
   """Return the strictness value resulting from adding `path` and `link` to `sofar`."""
+  assert isinstance(link, TimeLink)
   st = link.strict
   return combine_path(sofar, combine_path(path, st))
 
@@ -1977,6 +2104,7 @@ def check_chain(sofar, tp, item):
   
   If so, return the resulting strictness going to `tp` after `sofar`.
   """
+  assert isinstance(tp, TimePoint) and isinstance(item, TimeLink)
   path = item.to_tp.find_pseudo(tp)
   if test_point_answer(PRED_BEFORE, path):
     return combine_path(sofar, path)

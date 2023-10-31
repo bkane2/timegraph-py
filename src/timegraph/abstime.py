@@ -116,16 +116,19 @@ class AbsTime:
 
   def merge_abs_min(self, newabs, max):
     """Merge the minimum of this time and a new time, taking the maximum of the two."""
+    assert isinstance(newabs, AbsTime) and isinstance(max, AbsTime)
     return AbsTime(merge_min(self.time, newabs.time, max.time))
   
 
   def merge_abs_max(self, newabs, min):
     """Merge the maximum of this time and a new time, taking the minimum of the two."""
+    assert isinstance(newabs, AbsTime) and isinstance(min, AbsTime)
     return AbsTime(merge_max(self.time, newabs.time, min.time))
     
 
   def re_calc_abs_min(self, oldabs, max, duration):
     """Compute the new absolute time `duration` seconds after `propabs`, taking the maximum of that and `oldabs`."""
+    assert isinstance(oldabs, AbsTime) and isinstance(max, AbsTime)
     new = self.calc_add_dur(duration)
     new.time = choose_max(oldabs.time, new.time, max.time)
     return new
@@ -133,6 +136,7 @@ class AbsTime:
 
   def re_calc_abs_max(self, oldabs, min, duration):
     """Compute the new absolute time `duration` seconds before `propabs`, taking the minimum of that and `oldabs`."""
+    assert isinstance(oldabs, AbsTime) and isinstance(min, AbsTime)
     new = self.calc_sub_dur(duration)
     new.time = choose_min(oldabs.time, new.time, min.time)
     return new
@@ -162,6 +166,7 @@ class AbsTime:
 
   def compare(self, other):
     """Compare this to another absolute time and return the relation between them."""
+    assert isinstance(other, AbsTime)
     return compare(self.time, other.time)
 
 
@@ -174,6 +179,8 @@ class AbsTime:
   
 
   def __eq__(self, other):
+    if not isinstance(other, AbsTime):
+      return False
     return self.time == other.time
     
   
