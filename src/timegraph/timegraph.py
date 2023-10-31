@@ -6,7 +6,7 @@ from collections import UserList
 from timegraph.constants import *
 from timegraph.util import indent
 from timegraph.abstime import AbsTime, duration_min, combine_durations, get_best_duration
-from timegraph.pred import test_point_answer, inverse_reln, split_time_pred, build_pred
+from timegraph.pred import test_answer, test_point_answer, inverse_reln, split_time_pred, build_pred, combine_strict
 
 # ``````````````````````````````````````
 # TimePoint
@@ -41,8 +41,8 @@ class TimePoint:
     A list of in-chain descendant links.
   xdescendants : TimeLinkList
     A list of cross-chain descendant links.
-  alternate_names : list[str]
-    A list of names of alternative points collapsed into this.
+  alternate_names : set[str]
+    A set of names of alternative points collapsed into this.
 
   Parameters
   ----------
@@ -55,13 +55,14 @@ class TimePoint:
     self.pseudo = pseudo
     self.min_pseudo = float('-inf')
     self.max_pseudo = float('inf')
-    self.absolute_min = None
-    self.absolute_max = None
+    # absolute times initially unknown (i.e., every slot is a symbolic term)
+    self.absolute_min = AbsTime(['y1', 'mo1', 'd1', 'h1', 'm1', 's1'])
+    self.absolute_max = AbsTime(['y2', 'mo2', 'd2', 'h2', 'm2', 's2'])
     self.ancestors = TimeLinkList()
     self.xancestors = TimeLinkList()
     self.descendants = TimeLinkList()
     self.xdescendants = TimeLinkList()
-    self.alternate_names = []
+    self.alternate_names = set()
   
 
   def pseudo_before(self):
@@ -132,12 +133,46 @@ class TimePoint:
     return True if not self.descendants else False
   
 
+  def adjacent(self, tp):
+    """Check whether this point and `tp` are next to each other on the chain with no intervening points."""
+    return self.first_desc() == tp
+  
+
+  def first_desc(self):
+    """Return the first descendant of point on same chain (or self if no descendants)."""
+    return self if not self.descendants else self.descendants[0].to_tp
+
+
+  def first_anc(self):
+    """Return the first ancestor of point on same chain (or self if no ancestors)."""
+    return self if not self.ancestors else self.ancestors[0].from_tp
+  
+
   def update_first(self):
     """If this point is earlier on its chain than the current first point, update the first pointer."""
     meta = self.chain
     first = meta.first
     if not first or self.pseudo < first.pseudo:
       meta.first = self
+
+
+  def check_first(self):
+    """Check that this is the first point on its chain when a point is being replaced (through equal).
+    
+    In that case, the first indicator is set to the point's first descendant, and the minimum pseudo is
+    propagated if necessary.
+
+    Notes
+    -----
+    If this were happening within the same chain, the first point would be kept, and the others made equal
+    to it, so this situation would not arise.
+    """
+    mn = self.chain
+    if self.name == mn.first.name:
+      newp = self.first_desc()
+      mn.first = newp
+      if newp.min_pseudo == self.min_pseudo:
+        newp.first_desc().prop_min(newp.pseudo)
   
 
   def add_ancestor_link(self, timelink):
@@ -158,6 +193,42 @@ class TimePoint:
   def add_xdescendant_link(self, timelink):
     """Add a link on the cross chain descendant list."""
     self.xdescendants.add(timelink)
+
+
+  def prop_min(self, newmin):
+    """Propagate minimum pseudo time forward along descendants until it reaches a minimum greater than it."""
+    if newmin > float('-inf') and newmin >= self.min_pseudo:
+      self.min_pseudo = newmin
+      if self.descendants:
+        item = self.descendants[0]
+        item.to_tp.prop_min(newmin)
+
+
+  def prop_max(self, newmax):
+    """Propagate maximum pseudo time backward along ancestors until it reaches a maximum less than it."""
+    if newmax < float('inf') and newmax <= self.max_pseudo:
+      self.max_pseudo = newmax
+      if self.ancestors:
+        item = self.ancestors[0]
+        item.from_tp.prop_max(newmax)
+
+
+  def add_strictness(self, tp):
+    """Modify the max pseudo of self and the min pseudo of `tp` to ensure that they cannot be equal."""
+    oldmin = tp.min_pseudo
+    oldmax = self.max_pseudo
+    
+    # Set minimum of tp to be self, if this is more restrictive
+    if oldmin == float('-inf') or self.pseudo > oldmin:
+      newmin = self.pseudo
+      tp.min_pseudo = newmin
+      tp.prop_min(newmin)
+    
+    # Set maximum of self to be tp, if this is more restrictive
+    if oldmax == float('inf') or tp.pseudo < oldmax:
+      newmax = tp.pseudo
+      self.max_psuedo = newmax
+      self.prop_max(newmax)
 
 
   def prop_absmin(self):
@@ -390,9 +461,7 @@ class TimeLink:
       if d > 0 and not self.strict:
         self.strict = True
         if tp1.on_same_chain(tp2):
-          pass
-          # TODO
-          # tp1.add_strictness(tp2)
+          tp1.add_strictness(tp2)
       if not self.duration_min or d > self.duration_min:
         self.duration_min = d
         tp1.update_absolute_max(tp2.absolute_max.calc_sub_dur(d))
@@ -562,12 +631,14 @@ class EventPoint:
   Parameters
   ----------
   name : str
+  start : TimePoint, optional
+  end : TimePoint, optional
   """
 
-  def __init__(self, name):
+  def __init__(self, name, start=None, end=None):
     self.name = name
-    self.start = None
-    self.end = None
+    self.start = start if start else TimePoint(name+'start')
+    self.end = end if end else TimePoint(name+'end')
 
 
 
@@ -629,6 +700,11 @@ class TimeGraph:
   def event_point(self, name):
     """Return the event point corresponding to `name`, if there is one, otherwise None."""
     return self.events[name] if name in self.events else None
+  
+
+  def is_event(self, name):
+    """Check whether `name` is a registered event point."""
+    return isinstance(name, str) and name in self.events
   
 
   def add_meta_link(self, timelink):
@@ -739,18 +815,26 @@ class TimeGraph:
     return tp
   
 
-  def add_absolute_min(self, tpname, abs):
-    """Add an absolute minimum time to `tpname` (creating the point if it doesn't exist)."""
-    if tpname not in self.timegraph:
-      self.add_single(tpname)
-    self.timegraph[tpname].update_absolute_min(abs)
+  def add_absolute_min(self, t, abs):
+    """Add an absolute minimum time to `t` (creating the point if it doesn't exist)."""
+    if isinstance(t, str):
+      tp = self.time_point(t)
+      if tp is None:
+        tp = self.add_single(t)
+    else:
+      tp = t
+    tp.update_absolute_min(abs)
 
 
-  def add_absolute_max(self, tpname, abs):
-    """Add an absolute maximum time to `tpname` (creating the point if it doesn't exist)."""
-    if tpname not in self.timegraph:
-      self.add_single(tpname)
-    self.timegraph[tpname].update_absolute_max(abs)
+  def add_absolute_max(self, t, abs):
+    """Add an absolute maximum time to `t` (creating the point if it doesn't exist)."""
+    if isinstance(t, str):
+      tp = self.time_point(t)
+      if tp is None:
+        tp = self.add_single(t)
+    else:
+      tp = t
+    tp.update_absolute_max(abs)
 
   
   def new_duration_min(self, tp1, tp2, d):
@@ -1091,6 +1175,771 @@ class TimeGraph:
           result = build_pred(PRED_CONTAINS, strict1=strict1, strict2=strict2)
 
     return result
+  
+
+  def check_inconsistent(self, f, l, reln, effort=DEFAULT_EFFORT):
+    """Return True if the two points would be inconsistent if the relation `reln` is added.
+    
+    Used to ensure that if evaluation came back with unknown (therefore ok to enter), the net
+    remains consistent after the entry. For example, if a <= b and we add a >= b, evaluation is
+    unknown, but to remain consistent, it must be a = b.
+    """
+    oldreln = self.find_point(f, l, effort=effort)
+    if reln == PRED_BEFORE:
+      return oldreln in PREDS_EQUIV + [PRED_AFTER, f'{PRED_AFTER}-{0}', f'{PRED_BEFORE}-{0}']
+    elif reln == PRED_AFTER:
+      return oldreln in PREDS_EQUIV + [PRED_BEFORE, f'{PRED_BEFORE}-{0}', f'{PRED_AFTER}-{0}']
+    else:
+      return False
+    
+
+  def update_point(self, tpname, newtp):
+    """Update the pointer for the point named `tpname` in the timegraph to `newtp`."""
+    newtp.alternate_names.add(tpname)
+    if tpname in self.timegraph:
+      self.timegraph[tpname] = newtp
+
+
+  def merge_names(self, tp1, tp2):
+    """Merge the names of `tp2` into `tp1`."""
+    for tpname in tp2.alternate_names:
+      self.update_point(tpname, tp1)
+    tp1.alternate_names = tp1.alternate_names.union(tp2.alternate_names)
+    self.update_point(tp2.name, tp1)
+
+
+  def collapse_nodes(self, tp1, tp2):
+    """Collapses two nodes into one to make them equal.
+    
+    First copy all the link information from the second point to the first, then
+    make the second point actually point to the first.
+    """
+    self.copy_links(tp1, tp2)
+    self.merge_names(tp1, tp2)
+
+
+  def get_path(self, tp1, tp2):
+    """Return a list containing all points in the same chain from `tp1` to `tp2`, inclusive."""
+    next = tp1.descendants[0].to_tp if tp1.descendants else None
+    if tp1 == tp2:
+      return [tp1]
+    elif not next:
+      raise Exception(f'No in-chain path exists between {tp1.name} and {tp2.name}.')
+    else:
+      return [tp1] + self.get_path(next, tp2)
+    
+
+  def collapse_chain(self, tp1, tp2):
+    """Make two points on the same chain equal (all points between must be made equal as well)."""
+    min1 = tp1.min_pseudo
+    min2 = tp2.min_pseudo
+    max1 = tp1.max_pseudo
+    max2 = tp2.max_pseudo
+    absmin1 = tp1.absolute_min
+    absmin2 = tp1.absolute_min
+    
+    for tpi in self.get_path(tp1, tp2)[1:]:
+      self.collapse_nodes(tp1, tpi)
+
+    # max and min must be most constrained of the points
+    if min2 > float('-inf') and min2 > min1:
+      tp1.min_pseudo = min2
+      tp1.first_desc().prop_min(min2)
+    if max2 < float('inf') and max2 < max1:
+      tp1.max_pseudo = max2
+      tp1.first_anc().prop_max(max2)
+
+    # update absolute time minimum if necessary - no need to propagate
+    # because propagation of min goes forward, and this would already
+    # have been done. Max would have been propagated back originally
+    # if max of tp2 were < max ot tp1
+    if absmin2 and (not absmin1 or test_answer(PRED_AFTER, absmin2.compare(absmin1))):
+      tp1.absolute_min = absmin2
+
+
+  def collapse_xchain(self, tp1, tp2):
+    """Make two time points on separate chains equal.
+    
+    It first checks to see if `tp2` is first on its chain, and if so, replaces
+    the first by `tp2`'s first descendant. Any links `tp2` has are copied to `tp1`,
+    and `tp2` is replaced by `tp1` in the time graph.
+    """
+    absmin2 = tp2.absolute_min
+    absmax2 = tp2.absolute_max
+
+    tp2.check_first()
+    self.copy_links(tp2, tp1)
+
+    # copy absolute time
+    tp1.update_absolute_min(absmin2)
+    tp1.update_absolute_max(absmax2)
+
+    self.merge_names(tp1, tp2)
+
+
+  def add_equal(self, t1, tp2):
+    """Make two points equal.
+    
+    `t1` is either a time point, or a name if no time point yet exists.
+    `tp2` is the time point for the second point, which must already exist.
+    """
+    # If t1 is new, just make it point to tp2
+    if isinstance(t1, str) and not t1 in self.timegraph:
+      self.update_point(t1, tp2)
+    
+    # Otherwise, we need to copy relevant info from tp1 to tp2
+    else:
+      tp1 = t1 if isinstance(t1, TimePoint) else self.time_point(t1)
+      # check to make sure that these points could be equal; otherwise could get loops
+      # TODO: this test only for those in same chain - should do consistency search for others
+      if tp1.on_same_chain(tp2) and not tp1.possibly_equal(tp2):
+        return
+      # check if they are already equal - no need to do anything
+      elif tp1 == tp2:
+        return
+      # if tp2 has not been replaced by any other point, copy its information to tp1 and replace
+      else:
+        if tp1.on_same_chain(tp2):
+          self.collapse_chain(tp1, tp2)
+        else:
+          self.collapse_xchain(tp1, tp2)
+
+
+  def add_before_same_chain(self, f, l, strictfl):
+    """Set the chain of point `f` to be the same as `l`'s, and set its pseudo time to be before `l`'s."""
+    f.chain = l.chain
+    f.pseudo = l.pseudo_before()
+
+    # if the arc between is strict, f's maximum is l, l's minimum is f, and this is propagated
+    if strict_p(strictfl):
+      f.max_pseudo = l.pseudo
+      l.min_pseudo = f.pseudo
+      l.prop_min(f.pseudo)
+    # otherwise, f's maximum is l's maximum
+    else:
+      f.max_pseudo = l.max_pseudo
+
+    f.update_first()
+      
+
+  def add_after_same_chain(self, l, f, strictfl):
+    """Set the chain of point `l` to be the same as `f`'s, and set its pseudo time to be after `f`'s."""
+    l.chain = f.chain
+    l.pseudo = f.pseudo_after()
+
+    # if the arc between is strict, l's minimum is f, f's maximum is l, and this is propagated
+    if strict_p(strictfl):
+      l.min_pseudo = f.pseudo
+      f.max_pseudo = l.pseudo
+      f.prop_max(l.pseudo)
+    # otherwise, l's minimum is f's minimum
+    else:
+      l.min_pseudo = f.min_pseudo
+
+
+  def add_between_same_chain(self, m, f, l, strictfm, strictml):
+    """Set the chain of point `m` to be the same as `f` and `l`, and set its pseudo time to be between."""
+    m.chain = f.chain
+    m.pseudo = f.pseudo_between(l)
+
+    # set m's minimum
+    # if the arc between f and m is strict, m's minimum is f, f's maximum is m, and this is propagated
+    if strict_p(strictfm):
+      m.min_pseudo = f.pseudo
+      f.max_pseudo = m.pseudo
+      f.prop_max(m.pseudo)
+      l.prop_min(f.pseudo)
+    # otherwise, m's minimum is f's minimum
+    else:
+      m.min_pseudo = f.min_pseudo
+
+    # set m's maximum
+    # if the arc between m and l is strict, m's maximum is l, l's minimum is m, and this is propagated
+    if strict_p(strictml):
+      m.max_pseudo = l.pseudo
+      l.min_pseudo = m.pseudo
+      l.prop_min(m.pseudo)
+      f.prop_max(l.pseudo)
+    # otherwise, m's maximum is l's maximum
+    else:
+      m.max_pseudo = l.max_pseudo
+
+
+  def add_on_new_chain(self, tp):
+    """Set the chain of `tp` to be a new chain, and set the first indicator for that new chain."""
+    tp.chain = self.newchain()
+    tp.pseudo = PSEUDO_INIT
+    tp.update_first()
+
+
+  def add_before(self, fname, lname, strict):
+    """Add `fname` before `lname`.
+    
+    If `fname` doesn't exist, it is added on the same chain as `lname` if possible.
+    Otherwise it starts a new chain. A link is added between them reflecting the strictness.
+    """
+    f = self.time_point(fname)
+    l = self.time_point(lname)
+
+    if l is None:
+      raise Exception(f"Time point {lname} doesn't exist in timegraph.")
+    
+    # if first is new, create it
+    if f is None:
+      f = TimePoint(fname)
+      self.update_point(fname, f)
+      if l.first_in_chain():
+        self.add_before_same_chain(f, l, strict)
+      else:
+        self.add_on_new_chain(f)
+      
+    # if they are on the same chain, adjust pseudo-times if necessary to reflect strictness
+    if f and strict_p(strict) and f.on_same_chain(l):
+      f.add_strictness(l)
+
+    # add the link
+    self.add_link(f, l, strict)
+
+    # update absolute times
+    f.update_absolute_max(l.absolute_max)
+    l.update_absolute_min(f.absolute_min)
+
+
+  def add_after(self, lname, fname, strict):
+    """Add `lname` after `fname`.
+    
+    If `lname` doesn't exist, it is added to the same chain as `fname` if possible.
+    Otherwise it starts a new chain. A link is added between them reflecting the strictness.
+    """
+    l = self.time_point(lname)
+    f = self.time_point(fname)
+
+    if f is None:
+      raise Exception(f"Time point {fname} doesn't exist in timegraph.")
+    
+    # if last is new, create it
+    if l is None:
+      l = TimePoint(lname)
+      self.update_point(lname, l)
+      if f.last_in_chain():
+        self.add_after_same_chain(l, f, strict)
+      else:
+        self.add_on_new_chain(l)
+
+    # if they are on the same chain, adjust pseudo-times if necessary to reflect strictness
+    if l and strict_p(strict) and f.on_same_chain(l):
+      f.add_strictness(l)
+
+    # add the link
+    # TODO: should we check for an existing link before adding one?
+    self.add_link(f, l, strict)
+
+    # update absolute times
+    l.update_absolute_min(f.absolute_min)
+    f.update_absolute_max(l.absolute_max)
+
+
+  def add_between(self, mname, fname, lname, strictfm, strictml):
+    """Add `mname` between `fname` and `lname`.
+    
+    If `mname` doesn't exist, try to add it to the same chain as `fname` and/or `lname`
+    to minimize chains. If this is not possible, a new chain is started. Links are created
+    between first and middle, and middle and last, reflecting the strictness given.
+    """
+    m = self.time_point(mname)
+    f = self.time_point(fname)
+    l = self.time_point(lname)
+
+    if f is None:
+      raise Exception(f"Time point {fname} doesn't exist in timegraph.")   
+    if l is None:
+      raise Exception(f"Time point {lname} doesn't exist in timegraph.") 
+    
+    # if middle is new, create it, unless it's just being set equal to one of the other points
+    if m is None:
+      if strictfm == 0:
+        self.add_equal(mname, f)
+        m = f
+      elif strictml == 0:
+        self.add_equal(mname, l)
+        m = l
+      else:
+        m = TimePoint(mname)
+        self.update_point(mname, m)
+        # if adjacent on same chain, add on same chain, else new chain
+        if f.on_same_chain(l):
+          if f.adjacent(l):
+            self.add_between_same_chain(m, f, l, strictfm, strictml)
+          else:
+            self.add_on_new_chain(m)
+        # if first is at end of chain, add middle after it
+        elif f.last_in_chain():
+          self.add_after_same_chain(m, f, strictfm)
+        # if last is at beginning of its chain, add middle before it
+        elif l.first_in_chain():
+          self.add_before_same_chain(m, l, strictml)
+        # otherwise add it on a new chain
+        else:
+          self.add_on_new_chain(m)
+
+    # if strictness indicates that first = middle, and middle wasn't just
+    # set to first above, make them equal; otherwise add the link between first/middle
+    if strictfm == 0:
+      if f != m:
+        self.add_equal(m, f)
+      else:
+        self.add_link(f, m, strictfm)
+
+    # if strictness indicates that middle = last, and middle wasn't just
+    # set to first above, make them equal; otherwise add the link between middle/last
+    if strictml == 0:
+      if m != l:
+        self.add_equal(m, l)
+      else:
+        self.add_link(m, l, strictml)
+
+    # update absolute times
+    m.update_absolute_min(f.absolute_min)
+    m.update_absolute_max(l.absolute_max)
+    f.update_absolute_max(m.absolute_max)
+    l.update_absolute_min(m.absolute_min)
+
+
+  def check_equal(self, name1, name2):
+    """Ensure that the call to ``add_equal`` will have the correct arguments."""
+    tp1 = self.time_point(name1)
+    tp2 = self.time_point(name2)
+    if tp1 is None:
+      # if tp1 is new and tp2 is new, add tp2 as a new point
+      if tp2 is None:
+        tp2 = self.add_single(name2)
+      self.add_equal(name1, tp2)
+    # if tp1 exists and tp2 is new, reverse the order of the arguments
+    elif tp2 is None:
+      self.add_equal(name2, tp1)
+    # oherwise, both exist
+    else:
+      if tp1.on_same_chain(tp2) and tp1.pseudo > tp2.pseudo:
+        self.add_equal(tp2, tp1)
+      else:
+        self.add_equal(tp1, tp2)
+
+
+  def check_before(self, fname, lname, strictfl):
+    """Ensure that the arguments are correct for ``add_before``."""
+    f = self.time_point(fname)
+    l = self.time_point(lname)
+
+    # first check to see if this is potentially inconsistent; if so, set strictness so they are equal instead
+    if f is not None and l is not None and strictfl < 0 and self.check_inconsistent(f, l, PRED_BEFORE):
+      strictfl = 0
+
+    # if the strictness indicates meets (equal), make the points equal
+    if strictfl == 0:
+      self.check_equal(fname, lname)
+
+    # if last doesn't exist use add_after, since it allows the end point to be new
+    elif l is None:
+      # if first doesn't exist either, add it
+      if f is None:
+        self.add_single(fname)
+      self.add_after(lname, fname, strictfl)
+    
+    # otherwise ready for add_before
+    else:
+      self.add_before(fname, lname, strictfl)
+
+
+  def check_after(self, lname, fname, strictfl):
+    """Ensure that the arguments are correct for ``add_after``."""
+    l = self.time_point(lname)
+    f = self.time_point(fname)
+
+    # first check to see if this is potentially inconsistent; if so, set strictness so they are equal instead
+    if l is not None and f is not None and strictfl < 0 and self.check_inconsistent(l, f, PRED_AFTER):
+      strictfl = 0
+
+    # if the strictness indicates meets (equal), make the points equal
+    if strictfl == 0:
+      self.check_equal(lname, fname)
+
+    # if first doesn't exist use add_before, since it allows the start point to be new
+    elif f is None:
+      # if last doesn't exist either, add it
+      if l is None:
+        self.add_single(lname)
+      self.add_before(fname, lname, strictfl)
+    
+    # otherwise ready for add_after
+    else:
+      self.add_after(lname, fname, strictfl)
+
+
+  def handle_between(self, mname, fname, lname, strictfm, strictml):
+    """Attempt to minimize the number of chains by using the appropriate combination of before, after, and between."""
+    m = self.time_point(mname)
+    f = self.time_point(fname)
+    l = self.time_point(lname)
+
+    # if strictness indicates first and middle equal, make them equal and try to add middle before last
+    if l is not None and f is not None and combine_strict(strictfm, strictml) < 0 and self.check_inconsistent(l, f, PRED_AFTER):
+      strictfm = 0
+      strictml = 0
+
+    # first = middle --> make them equal and try to add middle before last
+    if strictfm == 0:
+      self.check_equal(mname, fname)
+      self.check_before(mname, lname, strictml)
+    
+    # last = middle --> make them equal and try to add middle after first
+    elif strictml == 0:
+      self.check_equal(mname, lname)
+      self.check_after(mname, fname, strictfm)
+
+    # otherwise use add-between
+    else:
+      self.add_between(mname, fname, lname, strictfm, strictml)
+
+
+  def check_between(self, mname, fname, lname, strictfm, strictml):
+    """Prepare to call ``add_between`` which requires that first and last points exist."""
+    m = self.time_point(mname)
+    f = self.time_point(fname)
+    l = self.time_point(lname)
+
+    # first check to see if this is potentially inconsistent; if so, set strictness to make them equal
+    if m is not None and f is not None and strictfm < 0 and self.check_inconsistent(m, f, PRED_AFTER):
+      strictfm = 0
+    if m is not None and l is not None and strictml < 0 and self.check_inconsistent(m, l, PRED_BEFORE):
+      strictml = 0
+    
+    # if middle doesn't exist, make sure first/last exist (adding them if not), and add middle between
+    if m is None:
+      self.check_before(fname, lname, combine_strict(strictfm, strictml))
+      self.handle_between(mname, fname, lname, strictfm, strictml)
+
+    # if middle already exists, and is at either extreme of its chain, use before and after to ensure
+    # that if first/last don't exist, the minimum number of chains are created
+    elif m.first_in_chain() or m.last_in_chain():
+      self.check_before(fname, mname, strictfm)
+      self.check_after(lname, mname, strictml)
+
+    # otherwise, if either first/last are missing, add last before first using check_after, then middle between
+    else:
+      self.check_after(lname, fname, combine_strict(strictfm, strictml))
+      self.handle_between(mname, fname, lname, strictfm, strictml)
+
+
+  def enter_point(self, tpname1, stem, tpname2, tpname3=None, strict1=-1, strict2=-1):
+    """Enter a particular relation between time points (no events at this stage)."""
+    if stem == PRED_BETWEEN or tpname1 != tpname2:
+      if not stem:
+        self.add_single(tpname1)
+      elif stem in PREDS_EQUIV:
+        self.check_equal(tpname1, tpname2)
+      elif stem == PRED_BEFORE:
+        self.check_before(tpname1, tpname2, strict1)
+      elif stem == PRED_AFTER:
+        self.check_after(tpname1, tpname2, strict1)
+      elif stem == PRED_BETWEEN:
+        if tpname3 is None:
+          raise Exception(f'A third point must be given as "tpname3" for predicate "before".')
+        self.check_between(tpname1, tpname2, tpname3, strict1, strict2)
+      else:
+        raise Exception(f'Unsupported predicate stem {stem}')
+      
+
+  def register_event(self, eventname):
+    """Set up an event point with its start and end timepoints, if one does not already exist."""
+    e = self.event_point(eventname)
+    if e is None:
+      e = EventPoint(eventname)
+      self.events[eventname] = e
+    return e
+      
+
+  def add_event(self, e):
+    """Enter a link between the start and end points of an event if one doesn't already exist."""
+    if not isinstance(e, EventPoint):
+      raise Exception(f'Input must be of type EventPoint.')
+    self.enter_point(e.start, PRED_BEFORE, e.end)
+
+
+  def enter_duration_min(self, a1, a2, dur):
+    """Prepare the arguments for the low-level routine ``add_duration_min``."""
+    tpname1 = get_end_name(a1)
+    tpname2 = get_start_name(a2)
+    self.add_duration_min(tpname1, tpname2, dur)
+
+
+  def enter_duration_max(self, a1, a2, dur):
+    """Prepare the arguments for the low-level routine ``add_duration_max``."""
+    tpname1 = get_end_name(a1)
+    tpname2 = get_start_name(a2)
+    self.add_duration_max(tpname1, tpname2, dur)
+
+
+  def enter_reln(self, a1, stem, a2, a3=None, strict1=-1, strict2=-1):
+    """Enter the given relation (`stem` `strict1` `strict2`) between the points or events `a1`, `a2`, and possibly `a3`.
+    
+    It attempts to minimize the number of chains created by ordering the relations in a specific way,
+    and using "between" rather than "after"/"before" where possible.
+
+    Notes
+    -----
+    At this stage there are no absolute time arguments.
+    """
+    a1start = get_start_name(a1)
+    a2start = get_start_name(a2)
+    a3start = get_start_name(a3)
+    a1end = get_end_name(a1)
+    a2end = get_end_name(a2)
+    a3end = get_end_name(a3)
+
+    if a3 is not None:
+      self.enter_reln(a2, PRED_DURING, a3)
+
+    # handle individual relations
+    if stem in PREDS_EQUIV:
+      self.enter_point(a2start, PRED_EQUAL, a2start)
+      self.enter_point(a1end, PRED_EQUAL, a2end)
+    elif stem == PRED_BEFORE:
+      if a3 is None:
+        self.enter_point(a1end, PRED_BEFORE, a2start, strict1=strict1)
+        self.enter_point(a1start, PRED_BEFORE, a1end)
+      else:
+        self.enter_point(a1end, PRED_BETWEEN, a3start, a2start, strict2=strict1)
+        self.enter_point(a1start, PRED_BETWEEN, a3start, a1end)
+    elif stem == PRED_AFTER:
+      if a3 is None:
+        self.enter_point(a1start, PRED_AFTER, a2end, strict1=strict1)
+        self.enter_point(a1end, PRED_AFTER, a1start)
+      else:
+        self.enter_point(a1start, PRED_BETWEEN, a2end, a3end, strict1=strict1)
+        self.enter_point(a1end, PRED_BETWEEN, a1end, a3end)
+    elif stem == PRED_DURING:
+      if a3 is not None:
+        self.enter_point(a2start, PRED_AFTER, a3start)
+        self.enter_point(a2end, PRED_BEFORE, a3end)
+      self.enter_point(a1start, PRED_BETWEEN, a2start, a2end, strict1=strict1)
+      self.enter_point(a1end, PRED_BETWEEN, a1start, a2end, strict2=strict2)
+    elif stem == PRED_CONTAINS:
+      if a3 is None:
+        self.enter_point(a1start, PRED_BEFORE, a2start, strict1=strict1)
+        self.enter_point(a1end, PRED_AFTER, a2end, strict1=strict2)
+      else:
+        self.enter_point(a1start, PRED_BETWEEN, a3start, a2start, strict2=strict1)
+        self.enter_point(a1end, PRED_BETWEEN, a2end, a3end, strict1=strict2)
+      self.enter_point(a1start, PRED_BEFORE, a1end)
+    elif stem == PRED_OVERLAPS:
+      if a3 is None:
+        self.enter_point(a1end, PRED_BETWEEN, a2start, a2end, strict2=strict2)
+        self.enter_point(a1start, PRED_BEFORE, a2start, strict1=strict1)
+      else:
+        self.enter_point(a1start, PRED_BETWEEN, a3start, a2start, strict2=strict1)
+        self.enter_point(a1end, PRED_BETWEEN, a2start, a2end, strict2=strict2)
+        self.enter_point(a2end, PRED_BEFORE, a3end)
+    elif stem == PRED_OVERLAPPED_BY:
+      if a3 is None:
+        self.enter_point(a1start, PRED_BETWEEN, a2start, a2end, strict1=strict1)
+        self.enter_point(a1end, PRED_AFTER, a2end, strict1=strict2)
+      else:
+        self.enter_point(a1start, PRED_BETWEEN, a2start, a2end, strict1=strict1)
+        self.enter_point(a1end, PRED_BETWEEN, a2end, a3end, strict1=strict2)
+        self.enter_point(a3start, PRED_BEFORE, a2start)
+    
+    if isinstance(a2, EventPoint):
+      self.add_event(a2)
+
+
+  def enter_absolute(self, a1, stem, a2, a3=None, strict1=-1, strict2=-1):
+    """Enter a relation when `a2` is an absolute time.
+    
+    The relation dictates whether it is to be used as an upper or lower bound on the
+    absolute time of `a1`, or both. If `a1` is also an absolute time, nothing is done.
+
+    Notes
+    -----
+    This routine assumes that the other argument is an event (if not, no inconsistencies
+    will result - start or end of a point is the point itself - but redundant work may be done).
+
+    The `a3` argument is ignored, although it probably shouldn't be (TODO).
+    """
+    if not isinstance(a2, AbsTime):
+      raise Exception('Argument a2 must be of type AbsTime.')
+    
+    # a2 is absolute time; if a1 is also, don't do anything
+    if isinstance(a1, AbsTime):
+      return
+    
+    start = get_start_name(a1)
+    end = get_end_name(a1)
+
+    # handle individual relations
+    if stem == PRED_BEFORE:
+      self.add_absolute_max(end, a2)
+    elif stem == PRED_AFTER:
+      self.add_absolute_min(start, a2)
+    elif stem in PREDS_EQUIV:
+      self.add_absolute_min(start, a2)
+      self.add_absolute_max(end, a2)
+    elif stem == PRED_DURING:
+      pass # cannot do anything if during abs time
+    elif stem == PRED_CONTAINS:
+      self.add_absolute_max(start, a2)
+      self.add_absolute_min(end, a2)
+    elif stem == PRED_OVERLAPS:
+      self.add_absolute_min(start, a2)
+    elif stem == PRED_OVERLAPPED_BY:
+      self.add_absolute_max(start, a2)
+
+    if isinstance(a1, EventPoint):
+      self.add_event(a1)
+
+
+  def enter_abs_between(self, a1, stem, a2, a3=None, strict1=-1, strict2=-1):
+    """Enter a between relation when at least one of the arguments is an absolute time.
+    
+    If all are absolute times, nothing is done. Otherwise the appropriate absolute time
+    bounds are set, or relation entered.
+    """
+    if not isinstance(a1, AbsTime):
+      if isinstance(a2, AbsTime):
+        self.add_absolute_min(get_start_name(a1), a2)
+      else:
+        self.enter_reln(a1, PRED_AFTER, a2, strict1=strict1)
+      if isinstance(a3, AbsTime):
+        self.add_absolute_max(get_end_name(a1), a3)
+
+    else:
+      if not isinstance(a2, AbsTime):
+        self.add_absolute_max(get_end_name(a2), a1)
+      if not isinstance(a3, AbsTime):
+        self.add_absolute_min(get_start_name(a3), a1)
+
+    # ensure that any event always has its start before its end
+    if isinstance(a1, EventPoint):
+      self.add_event(a1)
+    if isinstance(a2, EventPoint):
+      self.add_event(a2)    
+    if isinstance(a3, EventPoint):
+      self.add_event(a3)
+
+
+  def enter_between(self, a1, stem, a2, a3=None, strict1=-1, strict2=-1):
+    """Enter the between relation when none of the arguments are absolute times."""
+    a1start = get_start_name(a1)
+    a1end = get_end_name(a1)
+    a2end = get_end_name(a2)
+    a3start = get_start_name(a3)
+
+    self.enter_point(a1end, PRED_BETWEEN, a2end, a3start, strict2=strict2)
+
+    # ensure that any event always has its start before its end
+    if isinstance(a1, EventPoint):
+      self.add_event(a1)
+    if isinstance(a2, EventPoint):
+      self.add_event(a2)    
+    if isinstance(a3, EventPoint):
+      self.add_event(a3)
+
+
+  def enter_duration_reln(self, a1, reln, a2, dur):
+    """Enter the relation suggested by `reln` and also the duration bound (min or max)."""
+    if reln == PRED_AT_LEAST_BEFORE:
+      self.enter_reln(a1, PRED_BEFORE, a2, strict1=1)
+      self.enter_duration_min(a1, a2, dur)
+    elif reln == PRED_AT_MOST_BEFORE:
+      self.enter_reln(a1, PRED_BEFORE, a2, strict1=1)
+      self.enter_duration_max(a1, a2, dur)
+    elif reln == PRED_EXACTLY_BEFORE:
+      self.enter_reln(a1, PRED_BEFORE, a2, strict1=1)
+      self.enter_duration_min(a1, a2, dur)
+      self.enter_duration_max(a1, a2, dur)
+    elif reln == PRED_AT_LEAST_AFTER:
+      self.enter_reln(a1, PRED_AFTER, a2, strict1=1)
+      self.enter_duration_min(a2, a1, dur)
+    elif reln == PRED_AT_MOST_AFTER:
+      self.enter_reln(a1, PRED_AFTER, a2, strict1=1)
+      self.enter_duration_max(a2, a1, dur)
+    elif reln == PRED_EXACTLY_AFTER:
+      self.enter_reln(a1, PRED_AFTER, a2, strict1=1)
+      self.enter_duration_min(a2, a1, dur)
+      self.enter_duration_max(a2, a1, dur)
+
+
+  def enter(self, a1, reln, a2, a3=None):
+    """Enter a particular temporal relationship for two (or three) arguments into the graph.
+
+    Each argument may be either a string, an EventPoint, or an AbsTime. By default, a string will
+    be interpreted as the name of a TimePoint that is to be created, or already exists in the graph.
+    However, if the name corresponds to an already registered EventPoint (see ``register_event``), then
+    that EventPoint will be used.
+    
+    Parameters
+    ----------
+    a1 : str, EventPoint, or AbsTime
+      The subject of the relation.
+    reln : str
+      A relation of form "{stem}-{strict1}-{strict2}", where the strictness values are optional
+      and may be omitted (see ``pred.py`` for more information).
+    a2 : str, EventPoint, or AbsTime
+      The object of the relation.
+    a3 : str, EventPoint, AbsTime, or None
+      The optional second object of the relation (for e.g. "between").
+    
+    Returns
+    -------
+    bool
+      Whether a relation was successfully entered.
+    """
+    stem, s1, s2 = split_time_pred(reln) 
+    enter_res = False
+
+    if self.is_event(a1):
+      a1 = self.event_point(a1)
+    if self.is_event(a2):
+      a2 = self.event_point(a2)
+    if a3 is not None and self.is_event(a3):
+      a3 = self.event_point(a3)
+    
+    if stem in PREDS_SEQ + PREDS_CONTAINMENT:
+      if isinstance(a3, EventPoint):
+        self.add_event(a3)
+      if a3 is None or isinstance(a3, EventPoint):
+        if isinstance(a2, AbsTime):
+          self.enter_absolute(a1, stem, a2, a3, s1, s2)
+        elif isinstance(a1, AbsTime):
+          self.enter_absolute(a2, inverse_reln(stem), a1, a3, s1, s2)
+        else:
+          self.enter_reln(a1, stem, a2, a3, s1, s2)
+        enter_res = True
+    elif stem in [PRED_EQUAL, PRED_SAME_TIME]:
+      if isinstance(a1, AbsTime):
+        self.enter_absolute(a2, stem, a1)
+      elif isinstance(a2, AbsTime):
+        self.enter_absolute(a1, stem, a2)
+      else:
+        self.enter_reln(a1, stem, a2)
+      enter_res = True
+    elif stem == PRED_BETWEEN:
+      if isinstance(a1, AbsTime) or isinstance(a2, AbsTime) or isinstance(a3, AbsTime):
+        self.enter_abs_between(a1, stem, a2, a3, s1, s2)
+      else:
+        self.enter_between(a1, stem, a2, a3, s1, s2)
+      enter_res = True
+    elif stem in [PRED_AT, PRED_EXACTLY]:
+      if not isinstance(a1, AbsTime) and not isinstance(a2, AbsTime) and type(a3) in [int, float]:
+        self.enter_duration_reln(a1, reln, a2, a3)
+        enter_res = True
+    elif stem == PRED_HAS_DURATION:
+      if not isinstance(a1, AbsTime) and isinstance(a1, EventPoint) and type(a2) in [int, float]:
+        self.enter_duration_reln(get_start(a1), PRED_EXACTLY_BEFORE, get_end(a1), a2)
+        enter_res = True
+    else:
+      raise Exception(f'Temporal relation "{reln}" not supported.')
+    
+    return enter_res
 
 
   def format_timegraph(self, verbose=False, lvl=0):
@@ -1160,6 +2009,16 @@ def get_start(x):
     return x
   else:
     return None
+  
+
+def get_start_name(x):
+  if isinstance(x, str):
+    return x
+  y = get_start(x)
+  if y is None or isinstance(y, AbsTime):
+    return None
+  else:
+    return y.name
 
 
 def get_end(x):
@@ -1179,3 +2038,13 @@ def get_end(x):
     return x
   else:
     return None
+  
+
+def get_end_name(x):
+  if isinstance(x, str):
+    return x
+  y = get_end(x)
+  if y is None or isinstance(y, AbsTime):
+    return None
+  else:
+    return y.name
