@@ -347,6 +347,9 @@ class TimePoint:
       if self.xdescendants:
         parts.append(f'{indent(lvl)}XDescendants')
         parts.append(self.xdescendants.format(node='to', lvl=lvl+1))
+      if self.alternate_names:
+        parts.append(f'{indent(lvl)}Alternate-names')
+        parts.append('\n'.join([f'{indent(lvl+1)}{n}' for n in self.alternate_names]))
     return '\n'.join(parts)
 
 
@@ -1898,14 +1901,15 @@ class TimeGraph:
 
     if self.is_event(a1):
       a1 = self.event_point(a1)
+      self.add_event(a1)
     if self.is_event(a2):
       a2 = self.event_point(a2)
+      self.add_event(a2)
     if a3 is not None and self.is_event(a3):
       a3 = self.event_point(a3)
+      self.add_event(a3)
     
     if stem in PREDS_SEQ + PREDS_CONTAINMENT:
-      if isinstance(a3, EventPoint):
-        self.add_event(a3)
       if a3 is None or isinstance(a3, EventPoint):
         if isinstance(a2, AbsTime):
           self.enter_absolute(a1, stem, a2, a3, s1, s2)
