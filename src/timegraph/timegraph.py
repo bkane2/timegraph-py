@@ -1015,7 +1015,7 @@ class TimeGraph:
     return res
   
 
-  def find_reln(self, tp1, tp2, effort=0):
+  def find_reln(self, tp1, tp2, effort=DEFAULT_EFFORT):
     """Find the most strict relation that holds between `tp1` and `tp2`.
     
     `effort` indicates how hard it should search (0 or 1).
@@ -1062,7 +1062,7 @@ class TimeGraph:
     return result
   
 
-  def find_point(self, t1, t2, effort=0):
+  def find_point(self, t1, t2, effort=DEFAULT_EFFORT):
     """Find the most strict relationship that holds between `t1` and `t2`, which may be either absolute times or points.
     
     `effort` indicates how hard it should search (0 or 1).
@@ -1095,7 +1095,7 @@ class TimeGraph:
       return PRED_UNKNOWN
   
 
-  def find_absolute(self, a1, a2, effort=0):
+  def find_absolute(self, a1, a2, effort=DEFAULT_EFFORT):
     """Return the relationship between `a1` and `a2`, where one is an absolute time.
     
     `effort` indicates how hard it should search (0 or 1).
@@ -1113,7 +1113,7 @@ class TimeGraph:
     return PRED_UNKNOWN
   
 
-  def find_absolute_reln(self, a1, a2, effort=0):
+  def find_absolute_reln(self, a1, a2, effort=DEFAULT_EFFORT):
     """Return the relationship between `a1` and `a2`, which may be events with absolute times.
     
     `effort` indicates how hard it should search (0 or 1).
@@ -1166,7 +1166,7 @@ class TimeGraph:
     return usedur
   
 
-  def calc_duration(self, tp1, tp2, effort=0):
+  def calc_duration(self, tp1, tp2, effort=DEFAULT_EFFORT):
     """Determine the duration between two points.
     
     If either point doesn't exist, returns unknown. If they exist, it first
@@ -1189,7 +1189,7 @@ class TimeGraph:
     return (durmin, durmax)
   
 
-  def find_relation(self, a1, a2, effort=0):
+  def find_relation(self, a1, a2, effort=DEFAULT_EFFORT):
     """Return the most strict relation found between `a1` and `a2`, which may be either events or points.
     
     It determines relationships between the starts, ends, and start of one, end of the other, and uses
@@ -2004,14 +2004,14 @@ class TimeGraph:
     
     Parameters
     ----------
-    a1 : str, EventPoint, or AbsTime
+    a1 : str, TimePoint, EventPoint, or AbsTime
       The subject of the relation.
     reln : str
       A relation of form "{stem}-{strict1}-{strict2}", where the strictness values are optional
       and may be omitted (see ``pred.py`` for more information).
-    a2 : str, EventPoint, or AbsTime
+    a2 : str, TimePoint, EventPoint, or AbsTime
       The object of the relation.
-    a3 : str, EventPoint, AbsTime, or None
+    a3 : str, TimePoint, EventPoint, AbsTime, or None
       The optional second object of the relation (for e.g. "between").
     
     Returns
@@ -2070,6 +2070,36 @@ class TimeGraph:
       raise Exception(f'Temporal relation "{reln}" not supported.')
     
     return enter_res
+  
+
+  def relation(self, a1, a2, effort=DEFAULT_EFFORT):
+    """Determine the strongest temporal relation which holds between `a1` and `a2`.
+
+    Parameters
+    ----------
+    a1 : str, TimePoint, EventPoint, or AbsTime
+      The subject of the relation to find.
+    a2 : str, TimePoint, EventPoint, or AbsTime
+      The object of the relation to find.
+    effort : int
+      How much effort to put into the search (0 or 1).
+    
+    Returns
+    -------
+    str
+      The found relation.
+    """
+    assert (type(a1) in [str, TimePoint, EventPoint, AbsTime] and
+            type(a2) in [str, TimePoint, EventPoint, AbsTime])
+    if isinstance(a1, str):
+      a1 = self.event_point(a1) if self.is_event(a1) else self.time_point(a1)
+    if isinstance(a2, str):
+      a2 = self.event_point(a2) if self.is_event(a2) else self.time_point(a2)
+
+    if isinstance(a1, AbsTime) or isinstance(a2, AbsTime):
+      return self.find_absolute_reln(a1, a2, effort=effort)
+    else:
+      return self.find_relation(a1, a2, effort=effort)
 
 
   def format_timegraph(self, verbose=False, lvl=0):

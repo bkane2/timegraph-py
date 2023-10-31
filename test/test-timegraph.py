@@ -12,22 +12,12 @@ tg = TimeGraph()
 # tg.enter('e1', 'before', AbsTime([2023, 1, 1, 1, 1, 1]))
 # tg.enter('e1', 'after', AbsTime([1997, 7, 2, 1, 1, 1]))
 
+
 tg.register_event('e1')
 tg.register_event('e2')
 tg.register_event('e3')
-tg.enter('e1', 'between', 'e2', 'e3')
+tg.enter('e2', 'between', 'e1', 'e3')
+# e1start > e1end > e2start > e2end > e3start > e3end
 
-
-# tg.add_single('tp1')
-# tg.add_single('tp2')
-# tg.add_duration_max('tp1', 'tp2', 1000)
-
-# print(tg.time_point('tp1').format(verbose=True))
 print(tg.format_timegraph(verbose=True))
-
-
-# print(tg.timegraph['e1end'].ancestors[0].from_tp)
-
-
-# TODO: debug why the above is moving e1start to a separate chain,
-# and why not all the points are getting added to the timegraph
+print(tg.relation('e2', 'e1'))
