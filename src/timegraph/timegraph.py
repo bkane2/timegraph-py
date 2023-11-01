@@ -674,25 +674,25 @@ class EventPoint:
   ----------
   name : str
     The symbol denoting the event.
-  start : TimePoint
-    The start time point.
-  end : TimePoint
-    The end time point.
+  start : str
+    The start time point name.
+  end : str
+    The end time point name.
 
   Parameters
   ----------
   name : str
-  start : TimePoint, optional
-  end : TimePoint, optional
+  start : str, optional
+  end : str, optional
   """
 
   def __init__(self, name, start=None, end=None):
     assert (isinstance(name, str) and
-            (isinstance(start, TimePoint) or start is None) and
-            (isinstance(end, TimePoint) or end is None))
+            (isinstance(start, str) or start is None) and
+            (isinstance(end, str) or end is None))
     self.name = name
-    self.start = start if start else TimePoint(name+'start')
-    self.end = end if end else TimePoint(name+'end')
+    self.start = start if start else name+'start'
+    self.end = end if end else name+'end'
 
 
 
@@ -762,6 +762,44 @@ class TimeGraph:
   def is_event(self, name):
     """Check whether `name` is a registered event point."""
     return isinstance(name, str) and name in self.events
+  
+
+  def get_start(self, a):
+    """Get the start of a given concept.
+    
+    `a` is either an event, absolute time, or time point. In the first two
+    cases, return the start time point and the absolute time itself, respectively. Otherwise,
+    just return the time point.
+    """
+    if not a:
+      return None
+    elif isinstance(a, EventPoint):
+      return self.time_point(a.start)
+    elif isinstance(a, AbsTime):
+      return a
+    elif isinstance(a, TimePoint):
+      return a
+    else:
+      return None
+    
+
+  def get_end(self, a):
+    """Get the end of a given concept.
+    
+    `a` is either an event, absolute time, or time point. In the first two
+    cases, return the end time point and the absolute time itself, respectively. Otherwise,
+    just return the time point.
+    """
+    if not a:
+      return None
+    elif isinstance(a, EventPoint):
+      return self.time_point(a.end)
+    elif isinstance(a, AbsTime):
+      return a
+    elif isinstance(a, TimePoint):
+      return a
+    else:
+      return None
   
 
   def add_meta_link(self, timelink):
@@ -1120,10 +1158,10 @@ class TimeGraph:
     """
     if isinstance(a1, AbsTime) and isinstance(a2, AbsTime):
       return self.find_absolute(a1, a2, effort=effort)
-    a1start = get_start(a1)
-    a2start = get_start(a2)
-    a1end = get_end(a1)
-    a2end = get_end(a2)
+    a1start = self.get_start(a1)
+    a2start = self.get_start(a2)
+    a1end = self.get_end(a1)
+    a2end = self.get_end(a2)
     res1 = self.find_absolute(a1start, a2end, effort=effort)
     res2 = self.find_absolute(a1end, a2start, effort=effort)
 
@@ -1144,9 +1182,9 @@ class TimeGraph:
 
   def search_for_duration(self, tp1, tp2, dur, already):
     """Return minimum and maximum durations if path between `tp1` and `tp2`; None otherwise."""
-    assert isinstance(tp1, TimePoint) and isinstance(tp2, TimePoint) and type(dur) in [int, float]
+    assert isinstance(tp1, TimePoint) and isinstance(tp2, TimePoint)
     desclist = tp1.descendants + tp1.xdescendants
-    usedur = None
+    usedur = (0, float('inf'))
     curdur = None
 
     for item in desclist:
@@ -1182,7 +1220,8 @@ class TimeGraph:
     durans = tp1.duration_between(tp2)
     durmin, durmax = durans
     if (not durmin or durmax == float('inf') or not durmax) and effort > 0:
-      durans = get_best_duration(durans, self.search_for_duration(tp1, tp2, None, [tp1.name]))
+      dursearch = self.search_for_duration(tp1, tp2, None, [tp1.name])
+      durans = get_best_duration(durans, dursearch)
     durmin, durmax = durans
     durmin = 0 if not durmin else durmin
     durmax = float('inf') if not durmax else durmax
@@ -1202,10 +1241,10 @@ class TimeGraph:
     if not type(a1) in [EventPoint, TimePoint] or not type(a2) in [EventPoint, TimePoint]:
       return PRED_UNKNOWN
     
-    a1start = get_start(a1)
-    a1end = get_end(a1)
-    a2start = get_start(a2)
-    a2end = get_end(a2)
+    a1start = self.get_start(a1)
+    a1end = self.get_end(a1)
+    a2start = self.get_start(a2)
+    a2end = self.get_end(a2)
     result = PRED_UNKNOWN
     isa1event = isinstance(a1, EventPoint)
     isa2event = isinstance(a2, EventPoint)
@@ -1771,7 +1810,7 @@ class TimeGraph:
   def add_event(self, e):
     """Enter a link between the start and end points of an event if one doesn't already exist."""
     assert isinstance(e, EventPoint)
-    self.enter_point(e.start.name, PRED_BEFORE, e.end.name)
+    self.enter_point(e.start, PRED_BEFORE, e.end)
 
 
   def enter_duration_min(self, a1, a2, dur):
@@ -2064,7 +2103,7 @@ class TimeGraph:
         enter_res = True
     elif stem == PRED_HAS_DURATION:
       if not isinstance(a1, AbsTime) and isinstance(a1, EventPoint) and type(a2) in [int, float]:
-        self.enter_duration_reln(get_start(a1), PRED_EXACTLY_BEFORE, get_end(a1), a2)
+        self.enter_duration_reln(self.get_start(a1), PRED_EXACTLY_BEFORE, self.get_end(a1), a2)
         enter_res = True
     else:
       raise Exception(f'Temporal relation "{reln}" not supported.')
@@ -2100,6 +2139,35 @@ class TimeGraph:
       return self.find_absolute_reln(a1, a2, effort=effort)
     else:
       return self.find_relation(a1, a2, effort=effort)
+    
+
+  def start_of(self, e):
+    """Gets the start of `e`, assumed to be an event name."""
+    assert isinstance(e, str)
+    if self.is_event(e):
+      return get_start_name(self.event_point(e))
+    else:
+      return e
+    
+
+  def end_of(self, e):
+    """Gets the end of `e`, assumed to be an event name."""
+    assert isinstance(e, str)
+    if self.is_event(e):
+      return get_end_name(self.event_point(e))
+    else:
+      return e
+    
+
+  def elapsed(self, a1, a2, effort=DEFAULT_EFFORT):
+    """Calculate the elapsed duration (min/max bounds) between two events or time points."""
+    assert (type(a1) in [str, TimePoint, EventPoint] and
+            type(a2) in [str, TimePoint, EventPoint])
+    if isinstance(a1, str):
+      a1 = self.event_point(a1) if self.is_event(a1) else self.time_point(a1)
+    if isinstance(a2, str):
+      a2 = self.event_point(a2) if self.is_event(a2) else self.time_point(a2)
+    return self.calc_duration(self.get_end(a1), self.get_start(a2), effort=effort)
 
 
   def format_timegraph(self, verbose=False, lvl=0):
@@ -2152,52 +2220,15 @@ def check_chain(sofar, tp, item):
 def strict_p(x):
   """Check if strictness value is strict."""
   return x == 1 or x == '1' or x == True
-
-
-def get_start(x):
-  """Get the start of a given concept.
-  
-  `x` is either an event, absolute time, or time point. In the first two
-  cases, return the start time point and the absolute time itself, respectively. Otherwise,
-  just return the time point.
-  """
-  if not x:
-    return None
-  elif isinstance(x, EventPoint):
-    return x.start
-  elif isinstance(x, AbsTime):
-    return x
-  elif isinstance(x, TimePoint):
-    return x
-  else:
-    return None
   
 
 def get_start_name(x):
   if isinstance(x, str):
     return x
-  y = get_start(x)
-  if y is None or isinstance(y, AbsTime):
-    return None
-  else:
-    return y.name
-
-
-def get_end(x):
-  """Get the end of a given concept.
-  
-  `x` is either an event, absolute time, or time point. In the first two
-  cases, return the end time point and the absolute time itself, respectively. Otherwise,
-  just return the time point.
-  """
-  if not x:
-    return None
-  elif isinstance(x, EventPoint):
-    return x.end
-  elif isinstance(x, AbsTime):
-    return x
   elif isinstance(x, TimePoint):
-    return x
+    return x.name
+  elif isinstance(x, EventPoint):
+    return x.start
   else:
     return None
   
@@ -2205,8 +2236,9 @@ def get_end(x):
 def get_end_name(x):
   if isinstance(x, str):
     return x
-  y = get_end(x)
-  if y is None or isinstance(y, AbsTime):
-    return None
+  elif isinstance(x, TimePoint):
+    return x.name
+  elif isinstance(x, EventPoint):
+    return x.end
   else:
-    return y.name
+    return None

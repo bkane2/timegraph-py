@@ -145,7 +145,7 @@ class AbsTime:
   def calc_duration_min(self, other):
     """Calculates the minimum duration between this and another absolute time."""
     if not other or not isinstance(other, AbsTime):
-      return None
+      return 0
     diff = other.to_num() - self.to_num()
     return diff if diff >= 0 else 0
   
@@ -158,9 +158,9 @@ class AbsTime:
     This works OK for all numeric absolute times, but not for ones with symbols.
     """
     if not other or not isinstance(other, AbsTime):
-      return None
+      return float('inf')
     if self.has_symbols() or other.has_symbols():
-      return None
+      return float('inf')
     return other.to_num() - self.to_num()
   
 
