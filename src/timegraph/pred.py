@@ -310,7 +310,7 @@ def test_point_result(test, s1, result, r1):
 def test_answer(reln, result):
   """Return whether `result` is acceptable for `reln` (or None if not known)."""
   if result == PRED_UNKNOWN:
-    return result
+    return None
   stem1, s1, s2 = split_time_pred(reln)
   stem2, t1, t2 = split_time_pred(result)
   return test_result(stem1, s1, s2, stem2, t1, t2)
@@ -319,7 +319,7 @@ def test_answer(reln, result):
 def test_point_answer(reln, result):
   """The same as ``test_answer``, except that the relations are assumed to be between points only."""
   if result == PRED_UNKNOWN:
-    return result
+    return None
   stem1, s1, _ = split_time_pred(reln)
   stem2, t1, _ = split_time_pred(result)
   return test_point_result(stem1, s1, stem2, t1)
@@ -332,6 +332,6 @@ def combine_test_results(*tests):
   elif False in tests:
     return False
   elif REL_UNKNOWN in tests:
-    return REL_UNKNOWN
+    return None
   else:
     return True

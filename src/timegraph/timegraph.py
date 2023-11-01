@@ -6,7 +6,8 @@ from collections import UserList
 from timegraph.constants import *
 from timegraph.util import indent
 from timegraph.abstime import AbsTime, duration_min, combine_durations, get_best_duration
-from timegraph.pred import test_answer, test_point_answer, inverse_reln, split_time_pred, build_pred, combine_strict
+from timegraph.pred import (test_answer, test_point_answer, inverse_reln, split_time_pred,
+                            build_pred, combine_strict, combine_test_results, determine_split)
 
 # ``````````````````````````````````````
 # TimePoint
@@ -1299,6 +1300,212 @@ class TimeGraph:
     return result
   
 
+  def evaluate_absolute(self, a1, stem, a2, a3=None, s1=-1, s2=-1, effort=DEFAULT_EFFORT):
+    """Determine the tests required to determine if a relation holds between points, where one is an absolute time.
+    
+    ``determine_split`` is used to get the relations needed between the points (only the first two are required - four
+    are returned in some cases); the tests are then done, and if any returns with False or unknown, that is the result,
+    otherwise True.
+    """
+    assert (type(a1) in [TimePoint, EventPoint, AbsTime] and isinstance(stem, str) and
+            type(a2) in [TimePoint, EventPoint, AbsTime] and
+            (type(a3) in [TimePoint, EventPoint, AbsTime] or a3 is None) and
+            isinstance(s1, int) and isinstance(s2, int))
+    predlist = determine_split(stem, s1, s2)
+    preds = [build_pred(a[0], strict1=a[1]) for a in predlist]
+    usepreds = preds[0:2]
+    tps1 = self.get_start(a1)
+    tpe1 = self.get_end(a1)
+    if stem == PRED_BETWEEN:
+      tp2 = self.get_end(a2)
+      tp3 = self.get_start(a3)
+      res1 = test_point_answer(usepreds[0], self.find_absolute(tps1, tp2, effort=effort))
+      res2 = test_point_answer(usepreds[1], self.find_absolute(tpe1, tp3, effort=effort))
+      return combine_test_results(res1, res2)
+    else:
+      tps2 = self.get_start(a2)
+      tpe2 = self.get_end(a2)
+      res1 = test_point_answer(usepreds[0], self.find_absolute(tps1, tps2, effort=effort))
+      res2 = test_point_answer(usepreds[1], self.find_absolute(tpe1, tpe2, effort=effort))
+      res12 = combine_test_results(res1, res2)
+      # should also check during a3
+      if a3 is None or not res12:
+        return res12
+      else:
+        res3 = self.evaluate_absolute(a1, PRED_DURING, a3)
+        return combine_test_results(res12, res3)
+      
+
+  def determine_tests(self, a1, stem, a2, a3=None, s1=-1, s2=-1):
+    """Return a list of tests to be done to see if the given relation holds between the given points/events.
+    
+    It uses ``determine_split`` which returns the relations that must hold between the start points, end points,
+    start of first/end of second, and start of second/end of first.
+    """
+    assert (type(a1) in [TimePoint, EventPoint] and isinstance(stem, str) and
+            type(a2) in [TimePoint, EventPoint] and
+            (type(a3) in [TimePoint, EventPoint] or a3 is None) and
+            isinstance(s1, int) and isinstance(s2, int))
+    predlist = determine_split(stem, s1, s2)
+    preds = [build_pred(a[0], strict1=a[1]) for a in predlist]
+    if stem == PRED_BETWEEN:
+      a1start = self.get_start(a1)
+      a1end = self.get_end(a1)
+      a2end = self.get_end(a2)
+      a3start = self.get_start(a3)
+      endtest = build_pred(PRED_BEFORE, combine_strict(s1, s2))
+      s1e2 = preds[0]
+      e1s3 = preds[1]
+      todolist = [(a1start, s1e2, a2end)]
+      if isinstance(a1, EventPoint):
+        todolist.append((a1end, e1s3, a3start))
+      todolist.append((a2end, endtest, a3start))
+      return todolist
+    else:
+      a1start = self.get_start(a1)
+      a1end = self.get_end(a1)
+      a2start = self.get_start(a2)
+      a2end = self.get_end(a2)
+      s1s2 = preds[0]
+      e1e2 = preds[1]
+      s1e2 = preds[2]
+      e1s2 = preds[3]
+      todolist = [(a1start, s1s2, a2start)]
+      if isinstance(a1, EventPoint) or isinstance(a2, EventPoint) or stem in PREDS_CONTAINMENT:
+        todolist.append((a1end, e1e2, a2end))
+        todolist.append((a1start, s1e2, a2end))
+        todolist.append((a1end, e1s2, a2start))
+      if a3 is not None:
+        todolist = todolist + self.determine_tests(a1, PRED_DURING, a3)
+      return todolist
+    
+
+  def evaluate_point_relations(self, a1, stem, a2, a3=None, s1=-1, s2=-1, effort=DEFAULT_EFFORT):
+    """Evaluate all tests for point/event relations."""
+    assert (type(a1) in [TimePoint, EventPoint] and isinstance(stem, str) and
+            type(a2) in [TimePoint, EventPoint] and
+            (type(a3) in [TimePoint, EventPoint] or a3 is None) and
+            isinstance(s1, int) and isinstance(s2, int))
+    todo = self.determine_tests(a1, stem, a2, a3, s1, s2)
+    res = True
+    majorres = True
+
+    for (tp1, pred, tp2) in todo:
+      res = test_point_answer(pred, self.find_point(tp1, tp2, effort=effort))
+      if res is False:
+        return res
+      elif res is None:
+        majorres = None
+    
+    if res is False:
+      return False
+    elif majorres is None:
+      return None
+    else:
+      return res
+    
+
+  def test_minimum_duration(self, dur, test):
+    """Determine if the minimum duration in `dur` is at least `test` (either a min/max pair or a number)."""
+    assert ((isinstance(dur, tuple) and len(dur) == 2 and type(dur[0]) in [int, float] and type(dur[1]) in [int, float]) and
+            ((isinstance(test, tuple) and len(test) == 2 and type(test[0]) in [int, float] and type(test[1]) in [int, float]) or
+             type(test) in [int, float]))
+    testvalue = test if isinstance(test, tuple) else (test, test)
+    testmin, testmax = testvalue
+    dmin, dmax = dur
+    if dmin is None or dmin == float('-inf'):
+      return None
+    elif dmin >= testmax:
+      return True
+    elif dmax is None or dmax == float('inf'):
+      return None
+    elif dmin == float('inf') or dmax == float('-inf') or dmin < testmin or dmax < testmin:
+      return False
+    else:
+      return None
+    
+
+  def test_maximum_duration(self, dur, test):
+    """Determine if the maximum duration in `dur` is at most `test` (either a min/max pair or a number)."""
+    assert ((isinstance(dur, tuple) and len(dur) == 2 and type(dur[0]) in [int, float] and type(dur[1]) in [int, float]) and
+            ((isinstance(test, tuple) and len(test) == 2 and type(test[0]) in [int, float] and type(test[1]) in [int, float]) or
+             type(test) in [int, float]))
+    testvalue = test if isinstance(test, tuple) else (test, test)
+    testmin, testmax = testvalue
+    dmin, dmax = dur
+    if dmax is None or dmax == float('inf'):
+      return None
+    elif dmax <= testmin:
+      return True
+    elif dmin is None or dmin == float('-inf'):
+      return None
+    elif dmin == float('inf') or dmax == float('-inf') or dmin > testmax or dmax > testmax:
+      return False
+    else:
+      return None
+
+
+  def evaluate_durations(self, a1, reln, a2, testdur, effort=DEFAULT_EFFORT):
+    """Try to determine if the given relation actually holds between `a1` and `a3` with duration `a3`.
+    
+    First determine the duration between them; if the duration comes back without giving any information,
+    check to see if the opposite relation holds between the points. If so, the answer is False.
+    """
+    assert (type(a1) in [TimePoint, EventPoint] and isinstance(reln, str) and
+            type(a2) in [TimePoint, EventPoint] and
+            type(testdur) in [int, float])
+    dur = None
+
+    # determine duration in appropriate direction
+    if reln in PREDS_CONSTRAINED_BEFORE:
+      dur = self.calc_duration(self.get_end(a1), self.get_start(a2), effort=effort)
+    elif reln in PREDS_CONSTRAINED_AFTER:
+      dur = self.calc_duration(self.get_end(a2), self.get_start(a1), effort=effort)
+    
+    # if inconclusive result, check to see if opposite relation holds
+    if dur is None or dur == (float('-inf'), float('inf')):
+      if reln in PREDS_CONSTRAINED_BEFORE:
+        res = self.evaluate_point_relations(a1, PRED_BEFORE, a2, strict1=1, effort=effort)
+        return False if res is False else None
+      elif reln in PREDS_CONSTRAINED_AFTER:
+        res = self.evaluate_point_relations(a1, PRED_AFTER, a2, strict1=1, effort=effort)
+        return False if res is False else None
+      else:
+        return None
+    # otherwise, look at the duration returned
+    else:
+      if reln in [PRED_AT_LEAST_BEFORE, PRED_AT_LEAST_AFTER]:
+        return self.test_minimum_duration(dur, testdur)
+      elif reln in [PRED_AT_MOST_BEFORE, PRED_AT_MOST_AFTER]:
+        return self.test_maximum_duration(dur, testdur)
+      elif reln in [PRED_EXACTLY_BEFORE, PRED_EXACTLY_AFTER]:
+        return combine_test_results(self.test_minimum_duration(dur, testdur),
+                                    self.test_maximum_duration(dur, testdur))
+      else:
+        return None
+
+
+  def evaluate_time(self, a1, reln, a2, a3=None, effort=DEFAULT_EFFORT, negated=False):
+    """Evaluate a particular relation between two or three arguments."""
+    assert (type(a1) in [TimePoint, EventPoint, AbsTime] and isinstance(reln, str) and
+            type(a2) in [TimePoint, EventPoint, AbsTime] and
+            (type(a3) in [TimePoint, EventPoint, AbsTime] or a3 is None))
+    if negated:
+      posans = self.evaluate_time(a1, reln, a2, a3, effort=effort)
+      if posans is None:
+        return None
+      else:
+        return not posans
+        
+    stem, s1, s2 = split_time_pred(reln)
+    if isinstance(a1, AbsTime) or isinstance(a2, AbsTime) or (stem == PRED_BETWEEN and isinstance(a3, AbsTime)):
+      return self.evaluate_absolute(a1, stem, a2, a3, s1, s2, effort=effort)
+    elif reln in PREDS_CONSTRAINED_BEFORE + PREDS_CONSTRAINED_AFTER:
+      return self.evaluate_durations(a1, reln, a2, a3, effort=effort) if type(a3) in [int, float] else None
+    else:
+      return self.evaluate_point_relations(a1, stem, a2, a3, s1, s2, effort=effort)
+  
+
   def check_inconsistent(self, f, l, reln, effort=DEFAULT_EFFORT):
     """Return True if the two points would be inconsistent if the relation `reln` is added.
     
@@ -2120,7 +2327,7 @@ class TimeGraph:
       The subject of the relation to find.
     a2 : str, TimePoint, EventPoint, or AbsTime
       The object of the relation to find.
-    effort : int
+    effort : int, default=1
       How much effort to put into the search (0 or 1).
     
     Returns
@@ -2139,6 +2346,43 @@ class TimeGraph:
       return self.find_absolute_reln(a1, a2, effort=effort)
     else:
       return self.find_relation(a1, a2, effort=effort)
+    
+
+  def evaluate(self, a1, reln, a2, a3=None, effort=DEFAULT_EFFORT, negated=False):
+    """Evaluate whether the given temporal relation is true, false, or unknown.
+    
+    Parameters
+    ----------
+    a1 : str, TimePoint, EventPoint, or AbsTime
+      The subject of the relation.
+    reln : str
+      A relation of form "{stem}-{strict1}-{strict2}", where the strictness values are optional
+      and may be omitted (see ``pred.py`` for more information).
+    a2 : str, TimePoint, EventPoint, or AbsTime
+      The object of the relation.
+    a3 : str, TimePoint, EventPoint, AbsTime, or None
+      The optional second object of the relation (for e.g. "between").
+    effort : int, default=1
+      How much effort to put into the search (0 or 1).
+    negated : bool, default=False
+      Whether to negate the result of the evaluation.
+
+    Returns
+    -------
+    bool or None
+      The result of the evaluation, where None is interpreted as "unknown".
+    """
+    assert (type(a1) in [str, TimePoint, EventPoint, AbsTime] and isinstance(reln, str) and
+            type(a2) in [str, TimePoint, EventPoint, AbsTime] and
+            (type(a3) in [str, TimePoint, EventPoint, AbsTime] or a3 is None))
+    if isinstance(a1, str):
+      a1 = self.event_point(a1) if self.is_event(a1) else self.time_point(a1)
+    if isinstance(a2, str):
+      a2 = self.event_point(a2) if self.is_event(a2) else self.time_point(a2)
+    if isinstance(a3, str):
+      a3 = self.event_point(a3) if self.is_event(a3) else self.time_point(a3)
+
+    return self.evaluate_time(a1, reln, a2, a3, effort=effort, negated=negated)
     
 
   def start_of(self, e):
