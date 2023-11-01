@@ -2168,6 +2168,17 @@ class TimeGraph:
     if isinstance(a2, str):
       a2 = self.event_point(a2) if self.is_event(a2) else self.time_point(a2)
     return self.calc_duration(self.get_end(a1), self.get_start(a2), effort=effort)
+  
+
+  def duration_of(self, a, effort=DEFAULT_EFFORT):
+    """Calculate the duration of an event."""
+    assert type(a) in [str, TimePoint, EventPoint]
+    if isinstance(a, str):
+      a = self.event_point(a) if self.is_event(a) else self.time_point(a)
+    if isinstance(a, EventPoint):
+      return self.calc_duration(self.get_start(a), self.get_end(a), effort=effort)
+    else:
+      return None
 
 
   def format_timegraph(self, verbose=False, lvl=0):
