@@ -20,5 +20,5 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/bkane2/ulflib-py"
-"Bug Tracker" = "https://github.com/bkane2/ulflib-py/issues"
+"Homepage" = "https://github.com/bkane2/timegraph-py"
+"Bug Tracker" = "https://github.com/bkane2/timegraph-py/issues"
