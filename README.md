@@ -61,13 +61,15 @@ the `enter` function should be used. It takes a temporal predicate along with 2 
 tg.enter('e1', 'before', 'e2')
 ```
 
-The following predicates and arguments are supported. Each of these predicates can also be modified with a strictness value for either argument, separated by dashes, indicating whether the relation is strictly before/after (value of 1) or an equality (value of 0). For example:
+Each predicate can be modified with a strictness value for either argument, separated by dashes, indicating whether the relation for that argument is strictly < or > (value of 1) or a "meets" relation (value of 0). By default, the strictness is -1, indicating <= or >= depending on the stem. For example:
 
 ```python
 tg.enter('e1', 'before-1', 'e2')
 tg.enter('e1', 'before-1-0', 'e2')
 tg.enter('e1', 'before--1', 'e2')
 ```
+
+The following basic predicates are supported:
 
 #### Sequential relations
 ```python
@@ -171,7 +173,41 @@ tg.duration(x, effort=1)
 
 ## Documentation
 
-TODO
+The timegraph implementation is structured as follows:
+
+#### constants.py
+
+Contains constants used throughout the package, including default values and supported predicates/relations between predicates.
+
+#### util.py
+
+Contains generic utility functions used in the package.
+
+#### pred.py
+
+Contains functions for processing and comparing predicate symbols.
+
+#### abstime.py
+
+Contains the implementation of the `AbsTime` class for representing an absolute time.
+
+#### timestructs.py
+
+Contains the main structures used in the timegraph data structure:
+
+* `TimePoint`: a time point (node in the timegraph), containing a pseudotime (and minimum/maximum bounds thereof), absolute time bounds, and adjacent time links.
+
+* `TimeLink`: a link between two time points, with associated strictness value (0 or 1), containing stored bounds on the duration.
+
+* `TimeLinkList`: a list of time links with a particular ordering on elements.
+
+* `MetaNode`: a time chain, i.e., a node in the "metagraph", with a pointer to the first element of the chain and all cross-links to other chains.
+
+* `EventPoint`: an event/interval with names for the start and end time points.
+
+#### timegraph.py
+
+The primary implementation of the timegraph object. Contains hash tables mapping each time point symbol to the corresponding node, each chain number to the corresponding meta node, and each event symbol to the corresponding event point.
 
 
 ## References
