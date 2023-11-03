@@ -1,14 +1,16 @@
 import sys
 sys.path.append("src/")
 
-from timegraph.timegraph import *
-from timegraph.abstime import *
+from timegraph.timegraph import TimeGraph
+from timegraph.abstime import AbsTime
 
 tg = TimeGraph()
 
 tg.register_event('e1')
 tg.register_event('e2')
-tg.enter('e1', 'before', 'e2')
+tg.register_event('e3')
+tg.enter('e1', 'before-0', 'e2')
+tg.enter('e2', 'before-0', 'e3')
 # tg.enter('e1', 'after', AbsTime([1997, 7, 2, 1, 1, 1]))
 # tg.enter('e1', 'before', AbsTime([2023, 1, 1, 1, 1, 1]))
 # tg.enter('e2', 'after', AbsTime([1998, 7, 2, 1, 1, 1]))

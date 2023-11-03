@@ -1,6 +1,7 @@
 """Timegraph implementation"""
 
 from timegraph.constants import *
+from timegraph.util import indent
 from timegraph.abstime import AbsTime, combine_durations, get_best_duration
 from timegraph.timestructs import TimePoint, TimeLink, TimeLinkList, MetaNode, EventPoint
 from timegraph.pred import (test_answer, test_point_answer, inverse_reln, split_time_pred,
@@ -1608,7 +1609,7 @@ class TimeGraph:
       else:
         self.enter_between(a1, stem, a2, a3, s1, s2)
       enter_res = True
-    elif stem in [PRED_AT, PRED_EXACTLY]:
+    elif stem in PREDS_CONSTRAINED:
       if not isinstance(a1, AbsTime) and not isinstance(a2, AbsTime) and type(a3) in [int, float]:
         self.enter_duration_reln(a1, reln, a2, a3)
         enter_res = True
@@ -1730,7 +1731,7 @@ class TimeGraph:
 
 
   def format_timegraph(self, verbose=False, lvl=0):
-    return '\n\n'.join([v.format(verbose=verbose, lvl=lvl+1) for v in self.timegraph.values()])
+    return '\n\n'.join([f'{indent(lvl)}{k}:\n{v.format(verbose=verbose, lvl=lvl+1)}' for k,v in self.timegraph.items()])
   
 
 
