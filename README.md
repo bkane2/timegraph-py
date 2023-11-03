@@ -71,7 +71,7 @@ tg.enter('e1', 'before--1', 'e2')
 
 The following basic predicates are supported:
 
-#### Sequential relations
+##### - Sequential relations
 ```python
 tg.enter(x, 'before', y)
 tg.enter(x, 'after', y)
@@ -79,7 +79,7 @@ tg.enter(x, 'after', y)
 
 Where `x` and `y` are either events or time points, or *at most one* is an absolute time.
 
-#### Containment relations
+##### - Containment relations
 ```python
 tg.enter(x, 'during', y)
 tg.enter(x, 'contains', y)
@@ -89,7 +89,7 @@ tg.enter(x, 'overlapped-by', y)
 
 Where `x` and `y` are either events or time points, or *at most one* is an absolute time.
 
-#### Equality relations
+##### - Equality relations
 ```python
 tg.enter(x, 'equal', y)
 tg.enter(x, 'same-time', y) # synonymous with the previous relation
@@ -97,14 +97,14 @@ tg.enter(x, 'same-time', y) # synonymous with the previous relation
 
 Where `x` and `y` are either events or time points, or *at most one* is an absolute time.
 
-#### Between relation
+##### - Between relation
 ```python
 tg.enter(x, 'between', y, z)
 ```
 
 Where `x`, `y`, and `z` are either events or time points, or *at most two* are absolute times.
 
-#### Duration-constrained sequential relations
+##### - Duration-constrained sequential relations
 ```python
 tg.enter(x, 'at-most-before', y, dur)
 tg.enter(x, 'at-least-before', y, dur)
@@ -116,7 +116,7 @@ tg.enter(x, 'exactly-after', y, dur)
 
 Where `x` and `y` are either events or time points, and `dur` is a numerical duration.
 
-#### Event duration relation
+##### - Event duration relation
 ```python
 tg.enter(x, 'has-duration', dur)
 ```
