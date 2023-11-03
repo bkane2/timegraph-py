@@ -347,7 +347,8 @@ class TimePoint:
   
 
   def __eq__(self, other):
-    assert isinstance(other, TimePoint)
+    if not isinstance(other, TimePoint):
+      return False
     return self.chain == other.chain and self.pseudo == other.pseudo
   
 
@@ -512,7 +513,8 @@ class TimeLink:
 
 
   def __eq__(self, other):
-    assert isinstance(other, TimeLink)
+    if not isinstance(other, TimeLink):
+      return False
     return (self.from_chain_number() == other.from_chain_number() and
             self.from_pseudo() == other.from_pseudo() and
             self.to_chain_number() == other.to_chain_number() and
