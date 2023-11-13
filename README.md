@@ -10,6 +10,12 @@ The implementation in this package is directly based on the time specialist in t
 
 
 
+## Dependencies
+
+* [graphviz](https://pypi.org/project/graphviz/)
+
+
+
 ## Summary
 
 Install the package using `pip install timegraph`.
@@ -171,6 +177,17 @@ tg.duration(x, effort=1)
 ```
 
 
+### visualize_timegraph
+
+The following function can be used to display the timegraph visually (NOTE: untested for timegraphs with more than two chains).
+
+```python
+from timegraph.timegraph import visualize_timegraph
+visualize_timegraph(tg, fname='figure1')
+```
+
+
+
 ## Documentation
 
 The timegraph implementation is structured as follows:
@@ -208,6 +225,7 @@ Contains the main structures used in the timegraph data structure:
 #### timegraph.py
 
 The primary implementation of the timegraph object. Contains hash tables mapping each time point symbol to the corresponding node, each chain number to the corresponding meta node, and each event symbol to the corresponding event point.
+
 
 
 ## References

@@ -1,5 +1,7 @@
 """Timegraph implementation"""
 
+import graphviz
+
 from timegraph.constants import *
 from timegraph.util import indent
 from timegraph.abstime import AbsTime, combine_durations, get_best_duration
@@ -1734,6 +1736,30 @@ class TimeGraph:
     return '\n\n'.join([f'{indent(lvl)}{k}:\n{v.format(verbose=verbose, lvl=lvl+1)}' for k,v in self.timegraph.items()])
   
 
+  def to_graph(self):
+    """Convert the timegraph to a standard graph object, i.e., a list of vertices and edges.
+    
+    Returns nodes of the form ``(id, label)``, and edges of the form ``(id1, id2, label)``
+    """
+    nodes = []
+    edges = []
+    visited = {}
+    for tp in self.timegraph.values():
+      if not tp.name in visited:
+        names = sorted(list(tp.alternate_names.union(set([tp.name]))))
+        names_str = '\n'.join(names)
+        nodes.append((tp.name, f'{tp.chain.chain_number} ~ {tp.pseudo}\n{names_str}'))
+        # for lst, label in zip([tp.ancestors, tp.xancestors, tp.descendants, tp.xdescendants],
+        #                       ['ancestors', 'x-ancestors', 'descendants', 'xdescendants']):
+        for lst, label in zip([tp.ancestors, tp.xancestors],
+                              ['ancestors', 'x-ancestors']):
+          for link in lst:
+            if link not in edges:
+              edges.append((link.from_tp.name, link.to_tp.name, label))
+        visited[tp.name] = tp
+    return nodes, edges
+
+
 
 # ``````````````````````````````````````
 # Find subroutines
@@ -1802,3 +1828,38 @@ def get_end_name(x):
     return x.end
   else:
     return None
+  
+
+def visualize_timegraph(tg, fname='./timegraph'):
+  """Visualize a plan as a graph using graphviz dot."""
+  nodes, edges = tg.to_graph()
+  dot = graphviz.Digraph()
+  dot.attr(compound='true')
+  dot.attr('node', colorscheme='pastel19')
+
+  def group_by_chain(nodes):
+    grps = {}
+    for node in nodes:
+      _, label = node
+      chain = label.split(' ~ ')[0]
+      if chain in grps:
+        grps[chain].append(node)
+      else:
+        grps[chain] = [node]
+    return grps
+  
+  grps = group_by_chain(nodes)
+
+  for chain, grp in grps.items():
+    with dot.subgraph(name=f'cluster_{chain}', node_attr={'shape': 'box'}) as dot1:
+      in_nodes = [n[0] for n in grp]
+      dot1.attr(rank='same')
+      for n in grp:
+        dot1.node(n[0], n[1], style='filled', fillcolor=str((int(chain)%9)+1))
+      for e in [e for e in edges if any([n == e[0] or n == e[1] for n in in_nodes]) and e[2][0:2] != 'x-']:
+        dot1.edge(e[0], e[1], constraint='true')
+
+  for e in [e for e in edges if e[2][0:2] == 'x-']:
+    dot.edge(e[0], e[1], style='dashed')
+
+  dot.render(f'{fname.rstrip(".gv")}.gv', view=True)
