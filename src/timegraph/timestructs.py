@@ -445,38 +445,38 @@ class TimeLink:
 
   def prop_min_to_point(self):
     """Propagate the minimum absolute time to the next descendant (the from point of this link)."""
-    pt1 = self.from_tp
-    pt2 = self.to_tp
-    pt1abs = pt1.absolute_min
-    pt1max = pt1.absolute_max
-    pt2abs = pt2.absolute_min
-    max = pt2.absolute_max
+    tp1 = self.from_tp
+    tp2 = self.to_tp
+    tp1abs = tp1.absolute_min
+    tp1max = tp1.absolute_max
+    tp2abs = tp2.absolute_min
+    max = tp2.absolute_max
     durmin = self.duration_min
-    durabs = pt1max.calc_duration_min(pt2abs)
+    durabs = tp1max.calc_duration_min(tp2abs)
     usedur = duration_min(durmin, durabs)
 
-    newabs = pt1abs.re_calc_abs_min(pt2abs, max, usedur)
-    if not newabs == pt2abs:
-      pt2.absolute_min = newabs
-      pt2.prop_absmin()
+    newabs = tp1abs.re_calc_abs_min(tp2abs, max, usedur)
+    if not newabs == tp2abs:
+      tp2.absolute_min = newabs
+      tp2.prop_absmin()
 
 
   def prop_max_to_point(self, oldabs):
     """Propagate the maximum absolute time to the previous ancestor (the to point of this link)."""
     assert isinstance(oldabs, AbsTime)
-    pt1 = self.to_tp
-    pt2 = self.from_tp
-    pt1abs = pt1.absolute_max
-    pt2min = pt2.absolute_min
-    pt2abs = pt2.absolute_max
+    tp1 = self.to_tp
+    tp2 = self.from_tp
+    tp1abs = tp1.absolute_max
+    tp2min = tp2.absolute_min
+    tp2abs = tp2.absolute_max
     durmin = self.duration_min
-    durabs = oldabs.calc_duration_min(pt2min)
+    durabs = oldabs.calc_duration_min(tp2min)
     usedur = duration_min(durmin, durabs)
 
-    newabs = pt1abs.re_calc_abs_max(pt2abs, pt2min, usedur)
-    if not newabs == pt2abs:
-      pt2.absolute_max = newabs
-      pt2.prop_absmax()
+    newabs = tp1abs.re_calc_abs_max(tp2abs, tp2min, usedur)
+    if not newabs == tp2abs:
+      tp2.absolute_max = newabs
+      tp2.prop_absmax(tp2abs)
 
 
   def calc_duration(self):
