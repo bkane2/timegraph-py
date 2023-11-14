@@ -50,4 +50,7 @@ for n in nodes:
 for n in edges:
   print(n)
 
+for tp in tg.topsort():
+  print(' - '.join(sorted(list(tp.alternate_names.union([tp.name])))))
+
 visualize_timegraph(tg)

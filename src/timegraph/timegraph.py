@@ -1736,6 +1736,32 @@ class TimeGraph:
     return '\n\n'.join([f'{indent(lvl)}{k}:\n{v.format(verbose=verbose, lvl=lvl+1)}' for k,v in self.timegraph.items()])
   
 
+  def topsort(self):
+    """Return a topological sort of the points in the timegraph.
+    
+    Notes
+    -----
+    Assumes no cycles (this should be valid, for a timegraph...).
+    """
+    ret = []
+    start = set([chain.first for chain in self.metagraph.values()])
+    visited_links = set()
+
+    while start:
+      tp = start.pop()
+      ret.append(tp)
+      desclist = tp.descendants + tp.xdescendants
+      for d in desclist:
+        if d not in visited_links:
+          tp1 = d.to_tp
+          visited_links.add(d)
+          ancslist = tp1.ancestors + tp1.xancestors
+          if not any([a not in visited_links for a in ancslist]):
+            start.add(tp1)
+    
+    return ret
+  
+
   def to_graph(self):
     """Convert the timegraph to a standard graph object, i.e., a list of vertices and edges.
     

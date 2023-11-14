@@ -521,6 +521,10 @@ class TimeLink:
             self.to_pseudo() == other.to_pseudo())
   
 
+  def __hash__(self):
+    return hash(self.from_tp.name + self.to_tp.name)
+  
+
   def format(self, node='both', lvl=0):
     if node == 'to':
       return f'{indent(lvl)}{self.to_tp.name}'

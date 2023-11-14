@@ -177,6 +177,15 @@ tg.duration(x, effort=1)
 ```
 
 
+### topsort
+
+The following function does a topological sort on the timegraph (including cross-links) and returns the ordered list of time points.
+
+```python
+tg.topsort()
+```
+
+
 ### visualize_timegraph
 
 The following function can be used to display the timegraph visually (NOTE: untested for timegraphs with more than two chains).
