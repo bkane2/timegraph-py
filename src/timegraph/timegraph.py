@@ -1139,16 +1139,16 @@ class TimeGraph:
     if strictfm == 0:
       if f != m:
         self.add_equal(m, f)
-      else:
-        self.add_link(f, m, strictfm)
+    else:
+      self.add_link(f, m, strictfm)
 
     # if strictness indicates that middle = last, and middle wasn't just
     # set to first above, make them equal; otherwise add the link between middle/last
     if strictml == 0:
       if m != l:
         self.add_equal(m, l)
-      else:
-        self.add_link(m, l, strictml)
+    else:
+      self.add_link(m, l, strictml)
 
     # update absolute times
     m.update_absolute_min(f.absolute_min)
@@ -1744,7 +1744,7 @@ class TimeGraph:
     Assumes no cycles (this should be valid, for a timegraph...).
     """
     ret = []
-    start = set([chain.first for chain in self.metagraph.values()])
+    start = set([chain.first for chain in self.metagraph.values() if not chain.first.ancestors + chain.first.xancestors])
     visited_links = set()
 
     while start:
